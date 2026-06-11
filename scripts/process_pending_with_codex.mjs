@@ -119,12 +119,13 @@ function prepareSources(draft, workDir) {
 function runCodex(prompt, resultPath) {
   const args = [];
   if (process.env.CODEX_SEARCH !== "0") args.push("--search");
-  args.push("exec", "--cd", REPO_ROOT, "--sandbox", process.env.CODEX_SANDBOX || "workspace-write");
-  args.push("--ask-for-approval", "never", "--output-last-message", resultPath);
+  args.push("--ask-for-approval", "never");
   if (process.env.CODEX_MODEL) args.push("-m", process.env.CODEX_MODEL);
   if (process.env.CODEX_REASONING_EFFORT) {
     args.push("-c", `model_reasoning_effort="${process.env.CODEX_REASONING_EFFORT}"`);
   }
+  args.push("exec", "--cd", REPO_ROOT, "--sandbox", process.env.CODEX_SANDBOX || "workspace-write");
+  args.push("--output-last-message", resultPath);
   args.push("-");
 
   const result = spawnSync(CODEX_BIN, args, {
