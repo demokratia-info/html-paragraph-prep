@@ -5,6 +5,7 @@ const DEFAULT_OWNER = "demokratia-info";
 const DEFAULT_DATA_REPO = "html-paragraph-prep-data";
 const DEFAULT_BRANCH = "main";
 const DEFAULT_BASE_PATH = "summary-html-desk";
+const DEFAULT_REASONING_EFFORT = "medium";
 const MAX_TEXT_SOURCE_CHARS = 120000;
 const MAX_FILE_DATA_CHARS = 28 * 1024 * 1024;
 
@@ -110,6 +111,7 @@ async function buildOpenAiPayload(payload, env) {
   const hasWebLinks = sources.some((source) => source.url && !looksLikeFileUrl(source.url));
   const responsePayload = {
     model: env.OPENAI_MODEL || DEFAULT_MODEL,
+    reasoning: buildReasoningConfig(env),
     input: [
       {
         role: "developer",
@@ -130,6 +132,12 @@ async function buildOpenAiPayload(payload, env) {
   };
   if (hasWebLinks) responsePayload.tools = [{ type: "web_search_preview" }];
   return responsePayload;
+}
+
+function buildReasoningConfig(env) {
+  const effort = String(env.OPENAI_REASONING_EFFORT || DEFAULT_REASONING_EFFORT).trim();
+  if (!effort || effort === "default") return undefined;
+  return { effort };
 }
 
 async function saveSourceFile(payload, env) {

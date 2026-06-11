@@ -12,6 +12,7 @@ GITHUB_BRANCH = "main"
 GITHUB_BASE_PATH = "summary-html-desk"
 # Override only if you want a different model.
 OPENAI_MODEL = "gpt-5.5"
+OPENAI_REASONING_EFFORT = "medium"
 MAX_OUTPUT_TOKENS = "2400"
 
 # Secrets:

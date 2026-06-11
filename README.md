@@ -73,6 +73,30 @@ Paste the deployed Worker URL into **Backend endpoint** inside the app.
 
 The Worker uses the OpenAI Responses API, supports text inputs, public document file URLs, private uploaded PDF/Word files stored in the data repo, and optional web search for ordinary URLs.
 
+## Model And Effort
+
+Set these in `workers/wrangler.toml` before deploying:
+
+```toml
+OPENAI_MODEL = "gpt-5.5"
+OPENAI_REASONING_EFFORT = "medium"
+MAX_OUTPUT_TOKENS = "2400"
+```
+
+Recommended effort values:
+
+- `low` for faster, cheaper routine summaries.
+- `medium` for balanced Hebrew document summaries.
+- `high` for difficult legal/academic documents where quality matters more than latency.
+- `xhigh` only for the hardest cases, with higher latency and cost.
+
+Then redeploy:
+
+```bash
+cd /home/talraviv/html-paragraph-prep/workers
+npx wrangler@3.114.14 deploy
+```
+
 ## Local Use
 
 You can open `index.html` directly in a browser. For service worker offline caching, serve it over HTTP:
