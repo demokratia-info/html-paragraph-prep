@@ -79,7 +79,7 @@ Set these in `workers/wrangler.toml` before deploying:
 
 ```toml
 OPENAI_MODEL = "gpt-5.5"
-OPENAI_REASONING_EFFORT = "medium"
+OPENAI_REASONING_EFFORT = "xhigh"
 MAX_OUTPUT_TOKENS = "2400"
 ```
 

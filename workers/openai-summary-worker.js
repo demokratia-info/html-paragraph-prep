@@ -5,7 +5,7 @@ const DEFAULT_OWNER = "demokratia-info";
 const DEFAULT_DATA_REPO = "html-paragraph-prep-data";
 const DEFAULT_BRANCH = "main";
 const DEFAULT_BASE_PATH = "summary-html-desk";
-const DEFAULT_REASONING_EFFORT = "medium";
+const DEFAULT_REASONING_EFFORT = "xhigh";
 const MAX_TEXT_SOURCE_CHARS = 120000;
 const MAX_FILE_DATA_CHARS = 28 * 1024 * 1024;
 
