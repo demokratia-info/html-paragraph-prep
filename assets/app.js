@@ -5,6 +5,7 @@ const SETTINGS_KEY = "summary-html-desk.settings.v1";
 const DB_NAME = "summary-html-desk";
 const DB_VERSION = 1;
 const DEFAULT_BACKEND_ENDPOINT = "https://summary-html-desk-openai.demokratia-info.workers.dev";
+const PASSWORD_SESSION_KEY = "summary-html-desk.editor-password.session";
 const MAX_PROMPT_SOURCE_CHARS = 80000;
 const MAX_BINARY_FILE_BYTES = 18 * 1024 * 1024;
 const VALID_STATUSES = new Set(["draft", "pending", "processing", "done", "error", "exported"]);
@@ -44,7 +45,9 @@ const state = {
   },
   draftSearch: "",
   draftStatusFilter: "all",
-  activeSourceTab: "text",
+  activeSourceTab: "link",
+  editorPassword: "",
+  authenticated: false,
   saveTimer: null,
   toastTimer: null,
   volatileFiles: new Map()
@@ -54,6 +57,14 @@ const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => Array.from(document.querySelectorAll(selector));
 
 const dom = {
+  loginScreen: $("#loginScreen"),
+  loginForm: $("#loginForm"),
+  loginPasswordInput: $("#loginPasswordInput"),
+  loginButton: $("#loginButton"),
+  loginError: $("#loginError"),
+  appHeader: $("#appHeader"),
+  app: $("#app"),
+  logoutButton: $("#logoutButton"),
   draftTitleInput: $("#draftTitleInput"),
   draftSelect: $("#draftSelect"),
   draftSearchInput: $("#draftSearchInput"),
@@ -80,6 +91,7 @@ const dom = {
   textSourceTitleInput: $("#textSourceTitleInput"),
   textSourceInput: $("#textSourceInput"),
   addTextSourceButton: $("#addTextSourceButton"),
+  linkTitleInput: $("#linkTitleInput"),
   linkUrlInput: $("#linkUrlInput"),
   linkNotesInput: $("#linkNotesInput"),
   addLinkSourceButton: $("#addLinkSourceButton"),
@@ -321,8 +333,15 @@ async function migrateLocalStorageDrafts() {
 }
 
 function bindEvents() {
+  dom.loginForm.addEventListener("submit", (event) => {
+    event.preventDefault();
+    loginWithPassword(dom.loginPasswordInput.value);
+  });
+
+  dom.logoutButton.addEventListener("click", logout);
+
   dom.newDraftButton.addEventListener("click", () => {
-    const draft = createDraft("CMS summary");
+    const draft = createDraft("New paper");
     state.drafts.unshift(draft);
     state.activeId = draft.id;
     render();
@@ -367,6 +386,7 @@ function bindEvents() {
     draft.title = dom.draftTitleInput.value.trimStart() || "Untitled summary";
     touchDraft(draft);
     renderDraftSelect();
+    renderDraftBrowser();
     saveStateSoon();
   });
 
@@ -441,6 +461,71 @@ function bindEvents() {
   dom.toggleDirectionButton.addEventListener("click", togglePreviewDirection);
 }
 
+async function loginWithPassword(password) {
+  const value = String(password || "").trim();
+  if (!value) {
+    showLoginError("Enter the editor password.");
+    return;
+  }
+
+  dom.loginButton.disabled = true;
+  dom.loginButton.querySelector("span:last-child").textContent = "Opening";
+  hideLoginError();
+  state.editorPassword = value;
+  dom.editorPasswordInput.value = value;
+
+  const loaded = await pullBackendSync({ skipConfirm: true, quiet: true });
+  dom.loginButton.disabled = false;
+  dom.loginButton.querySelector("span:last-child").textContent = "Open Workspace";
+
+  if (!loaded) {
+    state.editorPassword = "";
+    dom.editorPasswordInput.value = "";
+    sessionStorage.removeItem(PASSWORD_SESSION_KEY);
+    showLoginError("The password did not open the shared workspace.");
+    return;
+  }
+
+  sessionStorage.setItem(PASSWORD_SESSION_KEY, value);
+  showWorkspace();
+  showToast("Shared workspace opened.");
+}
+
+function showWorkspace() {
+  state.authenticated = true;
+  dom.loginScreen.hidden = true;
+  dom.appHeader.hidden = false;
+  dom.app.hidden = false;
+  render();
+}
+
+function showLogin(message = "") {
+  state.authenticated = false;
+  dom.loginScreen.hidden = false;
+  dom.appHeader.hidden = true;
+  dom.app.hidden = true;
+  if (message) showLoginError(message);
+  window.setTimeout(() => dom.loginPasswordInput.focus(), 0);
+}
+
+function logout() {
+  state.editorPassword = "";
+  dom.editorPasswordInput.value = "";
+  dom.loginPasswordInput.value = "";
+  sessionStorage.removeItem(PASSWORD_SESSION_KEY);
+  showLogin();
+}
+
+function showLoginError(message) {
+  dom.loginError.textContent = message;
+  dom.loginError.hidden = false;
+}
+
+function hideLoginError() {
+  dom.loginError.textContent = "";
+  dom.loginError.hidden = true;
+}
+
 function switchSourceTab(tab) {
   state.activeSourceTab = tab;
   $$(".tab-button").forEach((button) => {
@@ -513,27 +598,36 @@ function addLinkSource() {
     showToast("The URL is not valid.");
     return;
   }
-  const notes = normalizeWhitespace(dom.linkNotesInput.value);
+  const title = dom.linkTitleInput.value.trim() || deriveLinkTitle(parsed);
   const draft = activeDraft();
-  draft.sources.push({
-    id: createId(),
-    type: "link",
-    title: deriveLinkTitle(parsed),
-    url: parsed.href,
-    text: notes,
-    filename: "",
-    mimeType: "",
-    size: notes.length,
-    textAvailable: Boolean(notes),
-    fileAvailable: false,
-    createdAt: new Date().toISOString()
-  });
-  dom.linkUrlInput.value = "";
-  dom.linkNotesInput.value = "";
+  const existing = draft.sources.find((source) => source.type === "link");
+  if (existing) {
+    existing.title = title;
+    existing.url = parsed.href;
+    existing.text = "";
+    existing.size = 0;
+    existing.textAvailable = false;
+  } else {
+    draft.sources.push({
+      id: createId(),
+      type: "link",
+      title,
+      url: parsed.href,
+      text: "",
+      filename: "",
+      mimeType: "",
+      size: 0,
+      textAvailable: false,
+      fileAvailable: false,
+      createdAt: new Date().toISOString()
+    });
+  }
   touchDraft(draft);
   updatePrompt();
+  renderDraftBrowser();
   renderSources();
   saveStateSoon();
+  showToast("URL saved.");
 }
 
 async function addFiles(files) {
@@ -583,6 +677,7 @@ async function addFiles(files) {
 
   touchDraft(draft);
   updatePrompt();
+  renderDraftBrowser();
   renderSources();
   saveStateSoon();
   showToast(`${files.length} file${files.length === 1 ? "" : "s"} added.`);
@@ -595,6 +690,7 @@ async function removeSource(id) {
   await idbDelete("files", id);
   touchDraft(draft);
   updatePrompt();
+  renderDraftBrowser();
   renderSources();
   saveStateSoon();
 }
@@ -671,6 +767,9 @@ function render() {
   dom.promptOutput.value = draft.prompt || buildPrompt(draft);
   dom.proxyEndpointInput.value = DEFAULT_BACKEND_ENDPOINT;
   dom.backendEndpointInput.value = DEFAULT_BACKEND_ENDPOINT;
+  const primaryLink = draft.sources.find((source) => source.type === "link");
+  dom.linkTitleInput.value = primaryLink?.title || "";
+  dom.linkUrlInput.value = primaryLink?.url || "";
   dom.llmResultInput.value = draft.result || "";
   dom.htmlOutput.value = draft.html || "";
   dom.preview.dir = draft.direction || "auto";
@@ -826,7 +925,7 @@ function renderSources() {
     const title = document.createElement("h3");
     title.textContent = "No sources yet";
     const meta = document.createElement("p");
-    meta.textContent = "Add text, a link, or a file.";
+    meta.textContent = "Add a URL or upload one or more files.";
     content.append(title, meta);
     empty.append(content);
     dom.sourceList.replaceChildren(empty);
@@ -841,17 +940,54 @@ function renderSources() {
       const content = document.createElement("div");
       const kind = document.createElement("span");
       kind.className = "source-kind";
-      kind.textContent = source.type;
-      const title = document.createElement("h3");
-      title.textContent = source.title || source.filename || source.url || "Source";
+      kind.textContent = source.type === "link" ? "url" : source.type;
+
+      const titleLabel = document.createElement("label");
+      titleLabel.className = "field compact";
+      const titleCaption = document.createElement("span");
+      titleCaption.textContent = "Title";
+      const titleInput = document.createElement("input");
+      titleInput.type = "text";
+      titleInput.value = source.title || source.filename || source.url || "Source";
+      titleInput.addEventListener("input", () => {
+        source.title = titleInput.value.trimStart() || "Source";
+        touchDraft(draft);
+        updatePrompt();
+        renderDraftSelect();
+        renderDraftBrowser();
+        saveStateSoon();
+      });
+      titleLabel.append(titleCaption, titleInput);
+
       const meta = document.createElement("p");
       meta.textContent = sourceMeta(source);
-      content.append(kind, title, meta);
+      content.append(kind, titleLabel);
+
+      if (source.type === "link") {
+        const urlLabel = document.createElement("label");
+        urlLabel.className = "field compact";
+        const urlCaption = document.createElement("span");
+        urlCaption.textContent = "URL";
+        const urlInput = document.createElement("input");
+        urlInput.type = "url";
+        urlInput.value = source.url || "";
+        urlInput.addEventListener("input", () => {
+          source.url = urlInput.value.trim();
+          touchDraft(draft);
+          updatePrompt();
+          renderDraftBrowser();
+          saveStateSoon();
+        });
+        urlLabel.append(urlCaption, urlInput);
+        content.append(urlLabel);
+      }
+
+      content.append(meta);
 
       const actions = document.createElement("div");
       actions.className = "source-actions";
 
-      if (source.url || source.fileStored) {
+      if (source.url || source.fileStored || source.remoteFilePath) {
         const origin = document.createElement("button");
         origin.type = "button";
         origin.className = "icon-button";
@@ -1108,7 +1244,7 @@ function backendEndpoint() {
 }
 
 function editorPassword() {
-  return dom.editorPasswordInput.value;
+  return state.editorPassword || sessionStorage.getItem(PASSWORD_SESSION_KEY) || dom.editorPasswordInput.value;
 }
 
 async function backendPost(payload) {
@@ -1144,7 +1280,7 @@ async function saveBackendSettings() {
 async function pushBackendSync(options = {}) {
   if (!backendEndpoint()) {
     showToast("Shared storage is not configured.");
-    return;
+    return false;
   }
 
   setSyncBusy(true, options.busyMessage || "Saving shared work...");
@@ -1179,22 +1315,24 @@ async function pushBackendSync(options = {}) {
     await saveState();
     setSyncStatus(options.doneMessage || `Saved ${state.drafts.length} items and ${uploadedFiles} origin files.`);
     showToast(options.toastMessage || "Saved.");
+    return true;
   } catch (error) {
     setSyncStatus(error.message || "Save failed.");
     showToast(error.message || "Save failed.");
+    return false;
   } finally {
     setSyncBusy(false);
   }
 }
 
-async function pullBackendSync() {
+async function pullBackendSync(options = {}) {
   if (!backendEndpoint()) {
-    showToast("Shared storage is not configured.");
-    return;
+    if (!options.quiet) showToast("Shared storage is not configured.");
+    return false;
   }
 
-  if (state.drafts.length && !window.confirm("Refresh from the shared work list? Unsaved local edits may be lost.")) {
-    return;
+  if (!options.skipConfirm && state.drafts.length && !window.confirm("Refresh from the shared work list? Unsaved local edits may be lost.")) {
+    return false;
   }
 
   setSyncBusy(true, "Refreshing shared work...");
@@ -1203,6 +1341,9 @@ async function pullBackendSync() {
     if (!payload || !Array.isArray(payload.drafts)) throw new Error("Shared drafts file is invalid.");
 
     state.drafts = payload.drafts.map(normalizeDraft).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+    if (!state.drafts.length) {
+      state.drafts = [createDraft("New paper")];
+    }
     state.activeId = state.drafts[0]?.id || null;
     state.volatileFiles.clear();
 
@@ -1211,10 +1352,12 @@ async function pullBackendSync() {
     await saveState();
     render();
     setSyncStatus(`Loaded ${state.drafts.length} shared items.`);
-    showToast("Shared work refreshed.");
+    if (!options.quiet) showToast("Shared work refreshed.");
+    return true;
   } catch (error) {
     setSyncStatus(error.message || "Refresh failed.");
-    showToast(error.message || "Refresh failed.");
+    if (!options.quiet) showToast(error.message || "Refresh failed.");
+    return false;
   } finally {
     setSyncBusy(false);
   }
@@ -1702,6 +1845,13 @@ async function init() {
     render();
     switchSourceTab(state.activeSourceTab);
     registerServiceWorker();
+    const savedPassword = sessionStorage.getItem(PASSWORD_SESSION_KEY) || "";
+    if (savedPassword) {
+      dom.loginPasswordInput.value = savedPassword;
+      await loginWithPassword(savedPassword);
+    } else {
+      showLogin();
+    }
   } catch (error) {
     console.error("App failed to start", error);
     dom.saveStatus.textContent = "Database unavailable";

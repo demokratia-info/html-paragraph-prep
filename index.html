@@ -11,7 +11,26 @@
     <link rel="stylesheet" href="./assets/styles.css">
   </head>
   <body>
-    <header class="app-header">
+    <section class="login-screen" id="loginScreen" aria-labelledby="loginTitle">
+      <form class="login-panel" id="loginForm">
+        <img class="brand-mark" src="./assets/favicon.svg" width="44" height="44" alt="">
+        <div>
+          <h1 id="loginTitle">Summary HTML Desk</h1>
+          <p>Enter the editor password to open the shared workspace.</p>
+        </div>
+        <label class="field">
+          <span>Editor password</span>
+          <input id="loginPasswordInput" type="password" autocomplete="current-password" spellcheck="false">
+        </label>
+        <button class="button primary full" id="loginButton" type="submit">
+          <span aria-hidden="true">→</span>
+          <span>Open Workspace</span>
+        </button>
+        <p class="login-error" id="loginError" role="alert" hidden></p>
+      </form>
+    </section>
+
+    <header class="app-header" id="appHeader" hidden>
       <div class="brand">
         <img class="brand-mark" src="./assets/favicon.svg" width="40" height="40" alt="">
         <div>
@@ -20,9 +39,9 @@
         </div>
       </div>
       <div class="top-actions" aria-label="Draft actions">
-        <button class="button secondary" id="newDraftButton" type="button" title="New draft">
-          <span aria-hidden="true">+</span>
-          <span>New</span>
+        <button class="button secondary" id="pullBackendButton" type="button">
+          <span aria-hidden="true">⇣</span>
+          <span>Refresh</span>
         </button>
         <button class="button secondary" id="exportDraftsButton" type="button" title="Export drafts">
           <span aria-hidden="true">⇩</span>
@@ -33,38 +52,41 @@
           <span>Import</span>
         </label>
         <input id="importDraftsInput" class="visually-hidden" type="file" accept="application/json">
+        <button class="button secondary" id="logoutButton" type="button" title="Lock workspace">
+          <span aria-hidden="true">↩</span>
+          <span>Lock</span>
+        </button>
       </div>
     </header>
 
-    <main class="workspace" id="app">
-      <section class="panel panel-drafts" aria-labelledby="draftsTitle">
+    <main class="workspace" id="app" hidden>
+      <section class="panel panel-browser" aria-labelledby="browserTitle">
         <div class="panel-heading">
           <div>
-            <h2 id="draftsTitle">Draft</h2>
+            <h2 id="browserTitle">Sources</h2>
             <p id="saveStatus">Saved to browser database</p>
           </div>
-          <button class="icon-button danger" id="deleteDraftButton" type="button" title="Delete draft" aria-label="Delete draft">×</button>
         </div>
 
-        <label class="field">
-          <span>Title</span>
-          <input id="draftTitleInput" type="text" autocomplete="off" spellcheck="true">
-        </label>
+        <button class="button primary full" id="newDraftButton" type="button" title="Add new paper">
+          <span aria-hidden="true">+</span>
+          <span>Add New Paper</span>
+        </button>
 
-        <label class="field">
-          <span>Open draft</span>
+        <label class="field visually-hidden">
+          <span>Open source</span>
           <select id="draftSelect"></select>
         </label>
 
         <label class="field">
-          <span>Find summary</span>
+          <span>Search</span>
           <input id="draftSearchInput" type="search" autocomplete="off" spellcheck="true">
         </label>
 
         <label class="field">
-          <span>Show summaries</span>
+          <span>Status</span>
           <select id="draftStatusFilterInput">
-            <option value="all">All summaries</option>
+            <option value="all">All</option>
             <option value="ready-export">Ready to export</option>
             <option value="pending">Waiting</option>
             <option value="processing">Processing</option>
@@ -75,17 +97,21 @@
         </label>
 
         <div class="draft-browser" id="draftBrowser" aria-live="polite"></div>
+      </section>
 
-        <div class="stats-row" aria-label="Draft statistics">
+      <section class="panel panel-source" aria-labelledby="sourceTitle">
+        <div class="panel-heading">
           <div>
-            <strong id="sourceCount">0</strong>
-            <span>sources</span>
+            <h2 id="sourceTitle">Source Details</h2>
+            <p id="syncStatus">Shared work loaded.</p>
           </div>
-          <div>
-            <strong id="sourceChars">0</strong>
-            <span>chars</span>
-          </div>
+          <button class="icon-button danger" id="deleteDraftButton" type="button" title="Delete source" aria-label="Delete source">×</button>
         </div>
+
+        <label class="field">
+          <span>Source title</span>
+          <input id="draftTitleInput" type="text" autocomplete="off" spellcheck="true">
+        </label>
 
         <div class="status-panel" aria-label="Item status">
           <div class="status-main">
@@ -108,46 +134,25 @@
           </dl>
         </div>
 
-        <div class="section-tabs" role="tablist" aria-label="Source type">
-          <button class="tab-button active" type="button" data-source-tab="text" role="tab" aria-selected="true">Text</button>
-          <button class="tab-button" type="button" data-source-tab="link" role="tab" aria-selected="false">Link</button>
-          <button class="tab-button" type="button" data-source-tab="file" role="tab" aria-selected="false">Upload</button>
-        </div>
-
-        <div class="source-entry active" data-source-panel="text" role="tabpanel">
+        <div class="source-entry">
           <label class="field">
-            <span>Source title</span>
-            <input id="textSourceTitleInput" type="text" autocomplete="off" spellcheck="true">
+            <span>URL title</span>
+            <input id="linkTitleInput" type="text" autocomplete="off" spellcheck="true">
           </label>
           <label class="field">
-            <span>Source text</span>
-            <textarea id="textSourceInput" rows="8" spellcheck="true"></textarea>
-          </label>
-          <button class="button primary full" id="addTextSourceButton" type="button">
-            <span aria-hidden="true">+</span>
-            <span>Add Text</span>
-          </button>
-        </div>
-
-        <div class="source-entry" data-source-panel="link" role="tabpanel" hidden>
-          <label class="field">
-            <span>Document URL</span>
+            <span>URL</span>
             <input id="linkUrlInput" type="url" autocomplete="url" inputmode="url">
-          </label>
-          <label class="field">
-            <span>Notes</span>
-            <textarea id="linkNotesInput" rows="5" spellcheck="true"></textarea>
           </label>
           <button class="button primary full" id="addLinkSourceButton" type="button">
             <span aria-hidden="true">+</span>
-            <span>Add Link</span>
+            <span>Save URL</span>
           </button>
         </div>
 
-        <div class="source-entry" data-source-panel="file" role="tabpanel" hidden>
+        <div class="source-entry">
           <label class="drop-zone" for="fileSourceInput">
             <span class="drop-icon" aria-hidden="true">⇪</span>
-            <span>Upload PDF / Word / text</span>
+            <span>Upload one or more files</span>
           </label>
           <input id="fileSourceInput" class="visually-hidden" type="file" multiple accept=".pdf,.doc,.docx,.txt,.md,.markdown,.html,.htm,.csv,.json,.rtf,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/*">
           <p class="panel-note">Text files are read in the browser. PDF and Word files are kept with the saved item.</p>
@@ -155,28 +160,31 @@
 
         <div class="source-list" id="sourceList" aria-live="polite"></div>
 
-        <details class="sync-box" open>
-          <summary>Shared Work</summary>
-          <label class="field">
-            <span>Editor password</span>
-            <input id="editorPasswordInput" type="password" autocomplete="current-password" spellcheck="false">
-          </label>
-          <div class="button-row">
-            <button class="button secondary" id="pullBackendButton" type="button">
-              <span aria-hidden="true">⇣</span>
-              <span>Refresh</span>
-            </button>
-            <button class="button primary" id="pushBackendButton" type="button">
-              <span aria-hidden="true">✓</span>
-              <span>Save for Processing</span>
-            </button>
+        <div class="stats-row" aria-label="Source statistics">
+          <div>
+            <strong id="sourceCount">0</strong>
+            <span>items</span>
           </div>
-          <div class="visually-hidden" aria-hidden="true">
-            <input id="backendEndpointInput" type="url" inputmode="url" autocomplete="off" spellcheck="false">
-            <button id="saveBackendButton" type="button">Save Endpoint</button>
+          <div>
+            <strong id="sourceChars">0</strong>
+            <span>chars</span>
           </div>
-          <p class="panel-note" id="syncStatus">Enter the editor password. Save sends this item for processing; Refresh loads the latest shared work.</p>
-        </details>
+        </div>
+
+        <button class="button primary full" id="pushBackendButton" type="button">
+          <span aria-hidden="true">✓</span>
+          <span>Save for Processing</span>
+        </button>
+
+        <div class="visually-hidden" aria-hidden="true">
+          <input id="editorPasswordInput" type="password" autocomplete="current-password" spellcheck="false">
+          <input id="backendEndpointInput" type="url" inputmode="url" autocomplete="off" spellcheck="false">
+          <button id="saveBackendButton" type="button">Save Endpoint</button>
+          <input id="textSourceTitleInput" type="text">
+          <textarea id="textSourceInput"></textarea>
+          <button id="addTextSourceButton" type="button">Add Text</button>
+          <textarea id="linkNotesInput"></textarea>
+        </div>
       </section>
 
       <section class="panel panel-brief" aria-labelledby="briefTitle">
@@ -187,7 +195,9 @@
           </div>
         </div>
 
-        <div class="control-grid">
+        <details class="advanced-box">
+          <summary>Default prompt settings</summary>
+          <div class="control-grid">
           <label class="field">
             <span>Language</span>
             <select id="languageSelect">
@@ -216,12 +226,13 @@
               <option value="plain">Plain</option>
             </select>
           </label>
-        </div>
+          </div>
 
-        <label class="check-row">
-          <input id="includeLinksCheckbox" type="checkbox">
-          <span>Keep useful source links in the HTML</span>
-        </label>
+          <label class="check-row">
+            <input id="includeLinksCheckbox" type="checkbox">
+            <span>Keep useful source links in the HTML</span>
+          </label>
+        </details>
 
         <div class="button-row">
           <button class="button primary" id="buildPromptButton" type="button">
@@ -249,6 +260,10 @@
             <span aria-hidden="true">✓</span>
             <span>Save Text</span>
           </button>
+          <button class="button secondary" id="refreshHtmlButton" type="button" title="Generate HTML">
+            <span aria-hidden="true">↻</span>
+            <span>Generate HTML</span>
+          </button>
           <button class="button secondary" id="copyResultButton" type="button">
             <span aria-hidden="true">⧉</span>
             <span>Copy Result</span>
@@ -275,10 +290,6 @@
             <h2 id="outputTitle">HTML</h2>
             <p>CMS-ready output and preview</p>
           </div>
-          <button class="button secondary" id="refreshHtmlButton" type="button" title="Create HTML">
-            <span aria-hidden="true">↻</span>
-            <span>Create HTML</span>
-          </button>
         </div>
 
         <div class="button-row">

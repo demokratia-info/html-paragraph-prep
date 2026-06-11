@@ -19,15 +19,13 @@ This project is intentionally independent of `Documents/DemocracyWebSite`.
 
 ## Safe Default Workflow
 
-1. Open the app.
-2. Add Hebrew document links, paste source text, or upload PDF/Word/text files.
-3. Enter the editor password.
-4. Edit the saved prompt if needed, or click **Default Prompt** to restore the default.
-5. Click **Save for Processing**. The item status becomes **Waiting**.
+1. Open the app and enter the editor password once.
+2. Use the left panel to browse papers, search, filter by status, or click **Add New Paper**.
+3. Use the source panel to edit the paper title, save one URL, upload one or more files, and click **Save for Processing**.
+4. Use the text panel to edit the prompt and generated text. Click **Generate HTML** when the text is ready.
+5. Use the HTML panel to review and click **Copy HTML**. The item status becomes **Exported**.
 6. The local Codex cron job processes waiting items and changes the status to **Ready**.
 7. Click **Refresh** to load the latest shared work.
-8. Edit the result if needed, then click **Save Text**.
-9. Click **Create HTML**, then **Copy HTML**. The item status becomes **Exported**.
 
 Each item displays the last modified time, last processed time, and last exported time.
 

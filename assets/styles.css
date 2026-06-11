@@ -20,6 +20,10 @@
   box-sizing: border-box;
 }
 
+[hidden] {
+  display: none !important;
+}
+
 html {
   min-height: 100%;
   background: var(--bg);
@@ -40,6 +44,45 @@ input,
 select,
 textarea {
   font: inherit;
+}
+
+.login-screen {
+  display: grid;
+  min-height: 100vh;
+  place-items: center;
+  padding: 20px;
+}
+
+.login-panel {
+  display: flex;
+  width: min(100%, 380px);
+  flex-direction: column;
+  gap: 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+  box-shadow: var(--shadow);
+  padding: 22px;
+}
+
+.login-panel h1 {
+  margin: 0;
+  font-size: 22px;
+  line-height: 1.15;
+}
+
+.login-panel p {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.login-error {
+  border: 1px solid #f3b7ad;
+  border-radius: 6px;
+  background: #fff4f2;
+  color: var(--danger) !important;
+  padding: 9px 10px;
 }
 
 button,
@@ -99,10 +142,11 @@ summary {
 
 .workspace {
   display: grid;
-  grid-template-columns: minmax(280px, 0.86fr) minmax(360px, 1.16fr) minmax(360px, 1.16fr);
+  grid-template-columns: minmax(250px, 0.8fr) minmax(300px, 1fr) minmax(360px, 1.1fr) minmax(340px, 1fr);
   gap: 16px;
   width: 100%;
   min-height: calc(100vh - 70px);
+  max-height: calc(100vh - 70px);
   padding: 16px;
 }
 
@@ -116,6 +160,14 @@ summary {
   background: var(--panel);
   box-shadow: var(--shadow);
   padding: 16px;
+  overflow: hidden;
+}
+
+.panel-browser .draft-browser,
+.panel-source .source-list {
+  flex: 1;
+  min-height: 0;
+  max-height: none;
 }
 
 .panel-heading {
@@ -137,6 +189,10 @@ summary {
   flex-direction: column;
   gap: 6px;
   min-width: 0;
+}
+
+.field.compact {
+  gap: 4px;
 }
 
 .field > span,
@@ -389,6 +445,10 @@ textarea:focus {
   border: 1px solid var(--line);
   border-radius: 8px;
   background: #fbfcfd;
+}
+
+.source-item .field {
+  margin-top: 6px;
 }
 
 .source-actions {
@@ -711,9 +771,11 @@ textarea:focus {
 
 @media (max-width: 1180px) {
   .workspace {
-    grid-template-columns: minmax(300px, 0.9fr) minmax(430px, 1.1fr);
+    grid-template-columns: minmax(280px, 0.9fr) minmax(360px, 1.1fr);
+    max-height: none;
   }
 
+  .panel-brief,
   .panel-output {
     grid-column: 1 / -1;
   }
