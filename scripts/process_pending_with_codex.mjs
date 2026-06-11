@@ -16,6 +16,8 @@ const MAX_PENDING_PER_RUN = clamp(Number(process.env.MAX_PENDING_PER_RUN || 1), 
 const MAX_SOURCE_CHARS = clamp(Number(process.env.MAX_SOURCE_CHARS || 120000), 1000, 500000);
 const CODEX_TIMEOUT_MS = clamp(Number(process.env.CODEX_TIMEOUT_MS || 45 * 60 * 1000), 60 * 1000, 3 * 60 * 60 * 1000);
 const PROCESSING_ROOT = path.join(REPO_ROOT, ".codex-processing");
+const GH_BIN = commandPath("gh");
+const CODEX_BIN = commandPath("codex");
 
 if (!GITHUB_OWNER || !GITHUB_REPO) {
   fail("DATA_REPO must look like owner/repo.");
@@ -26,8 +28,6 @@ main().catch((error) => {
 });
 
 async function main() {
-  requireCommand("gh");
-  requireCommand("codex");
   ensureDir(PROCESSING_ROOT);
 
   let processed = 0;
@@ -127,7 +127,7 @@ function runCodex(prompt, resultPath) {
   }
   args.push("-");
 
-  const result = spawnSync("codex", args, {
+  const result = spawnSync(CODEX_BIN, args, {
     cwd: REPO_ROOT,
     input: prompt,
     encoding: "utf8",
@@ -292,7 +292,7 @@ function contentEndpoint(remotePath) {
 }
 
 function runGh(args, options = {}) {
-  const result = spawnSync("gh", ["api", ...args], {
+  const result = spawnSync(GH_BIN, ["api", ...args], {
     cwd: REPO_ROOT,
     input: options.input,
     encoding: options.raw ? null : "utf8",
@@ -307,9 +307,10 @@ function runGh(args, options = {}) {
   return result.stdout;
 }
 
-function requireCommand(command) {
+function commandPath(command) {
   const result = spawnSync("bash", ["-lc", `command -v ${command}`], { encoding: "utf8" });
   if (result.status !== 0) throw new Error(`${command} is not installed or is not in PATH.`);
+  return result.stdout.trim() || command;
 }
 
 function readResultText(resultPath) {
