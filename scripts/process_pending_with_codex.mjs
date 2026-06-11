@@ -114,25 +114,96 @@ async function processDraft(state, draft) {
 function prepareSources(draft, workDir) {
   return (draft.sources || []).map((source, index) => {
     const prepared = { ...source, localPath: "", localPathError: "" };
-    if (source.remoteFilePath) {
-      try {
+    try {
+      if (source.remoteFilePath) {
         const raw = githubGetRaw(source.remoteFilePath);
         const filename = `${String(index + 1).padStart(2, "0")}-${safeFilename(source.filename || source.title || `source-${index + 1}`)}`;
         const localPath = path.join(workDir, "sources", filename);
         fs.writeFileSync(localPath, raw);
         prepared.localPath = localPath;
-        const extraction = extractLocalText(localPath, source);
+      } else if (source.url && !source.text) {
+        const downloaded = downloadUrlSource(source, index, workDir);
+        prepared.localPath = downloaded.localPath;
+        prepared.filename = prepared.filename || downloaded.filename;
+        prepared.mimeType = prepared.mimeType || downloaded.mimeType;
+      }
+
+      if (prepared.localPath) {
+        const extraction = extractLocalText(prepared.localPath, prepared);
         if (extraction.text) {
           prepared.extractedText = extraction.text;
-        } else if (textExtractionExpected(source)) {
+        } else if (textExtractionExpected(prepared)) {
           prepared.extractionError = extraction.error || "Local text extraction did not produce readable text.";
         }
-      } catch (error) {
-        prepared.localPathError = error?.message || String(error);
       }
+    } catch (error) {
+      prepared.localPathError = error?.message || String(error);
     }
     return prepared;
   });
+}
+
+function downloadUrlSource(source, index, workDir) {
+  let parsed;
+  try {
+    parsed = new URL(source.url);
+  } catch {
+    throw new Error(`The source URL is not valid: ${source.url}`);
+  }
+  if (!["http:", "https:"].includes(parsed.protocol)) {
+    throw new Error(`Only HTTP and HTTPS source URLs can be downloaded: ${source.url}`);
+  }
+
+  const curl = optionalCommandPath("curl");
+  if (!curl) throw new Error("curl is not installed, so URL sources cannot be downloaded locally.");
+
+  const filename = `${String(index + 1).padStart(2, "0")}-${safeFilename(filenameFromUrl(parsed) || source.title || `source-${index + 1}.html`)}`;
+  const localPath = path.join(workDir, "sources", filename);
+  const result = spawnSync(curl, [
+    "-L",
+    "--fail",
+    "--silent",
+    "--show-error",
+    "--max-time", "120",
+    "-A", "Mozilla/5.0 (compatible; SummaryHtmlDesk/1.0)",
+    "-o", localPath,
+    source.url
+  ], {
+    cwd: REPO_ROOT,
+    encoding: "utf8",
+    timeout: 130 * 1000,
+    maxBuffer: 20 * 1024 * 1024
+  });
+
+  if (result.error) throw result.error;
+  if (result.status !== 0) throw new Error(commandError("curl", result));
+  const stats = fs.statSync(localPath);
+  if (!stats.size) throw new Error(`The source URL downloaded an empty file: ${source.url}`);
+
+  return {
+    localPath,
+    filename,
+    mimeType: mimeTypeFromFilename(filename)
+  };
+}
+
+function filenameFromUrl(parsed) {
+  const pathname = decodeURIComponent(parsed.pathname || "");
+  const filename = pathname.split("/").filter(Boolean).pop() || "";
+  return filename.includes(".") ? filename : "";
+}
+
+function mimeTypeFromFilename(filename) {
+  const value = String(filename || "").toLowerCase();
+  if (value.endsWith(".pdf")) return "application/pdf";
+  if (value.endsWith(".docx")) return "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+  if (value.endsWith(".txt")) return "text/plain";
+  if (value.endsWith(".md") || value.endsWith(".markdown")) return "text/markdown";
+  if (value.endsWith(".html") || value.endsWith(".htm")) return "text/html";
+  if (value.endsWith(".csv")) return "text/csv";
+  if (value.endsWith(".json")) return "application/json";
+  if (value.endsWith(".rtf")) return "application/rtf";
+  return "";
 }
 
 function runCodex(prompt, resultPath) {

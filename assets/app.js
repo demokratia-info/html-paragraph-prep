@@ -6,8 +6,10 @@ const DB_NAME = "summary-html-desk";
 const DB_VERSION = 1;
 const DEFAULT_BACKEND_ENDPOINT = "https://summary-html-desk-openai.demokratia-info.workers.dev";
 const PASSWORD_SESSION_KEY = "summary-html-desk.editor-password.session";
+const PASSWORD_STORAGE_KEY = "summary-html-desk.editor-password.local";
 const MAX_PROMPT_SOURCE_CHARS = 80000;
 const MAX_BINARY_FILE_BYTES = 18 * 1024 * 1024;
+const SHARED_REFRESH_INTERVAL_MS = 60 * 1000;
 const VALID_STATUSES = new Set(["draft", "pending", "processing", "done", "error", "exported"]);
 const STATUS_TEXT = {
   draft: {
@@ -49,6 +51,8 @@ const state = {
   editorPassword: "",
   authenticated: false,
   saveTimer: null,
+  autoRefreshTimer: null,
+  syncBusy: false,
   toastTimer: null,
   volatileFiles: new Map()
 };
@@ -481,12 +485,12 @@ async function loginWithPassword(password) {
   if (!loaded) {
     state.editorPassword = "";
     dom.editorPasswordInput.value = "";
-    sessionStorage.removeItem(PASSWORD_SESSION_KEY);
+    forgetEditorPassword();
     showLoginError("The password did not open the shared workspace.");
     return;
   }
 
-  sessionStorage.setItem(PASSWORD_SESSION_KEY, value);
+  rememberEditorPassword(value);
   showWorkspace();
   showToast("Shared workspace opened.");
 }
@@ -496,11 +500,13 @@ function showWorkspace() {
   dom.loginScreen.hidden = true;
   dom.appHeader.hidden = false;
   dom.app.hidden = false;
+  startAutoRefresh();
   render();
 }
 
 function showLogin(message = "") {
   state.authenticated = false;
+  stopAutoRefresh();
   dom.loginScreen.hidden = false;
   dom.appHeader.hidden = true;
   dom.app.hidden = true;
@@ -508,12 +514,64 @@ function showLogin(message = "") {
   window.setTimeout(() => dom.loginPasswordInput.focus(), 0);
 }
 
+function startAutoRefresh() {
+  stopAutoRefresh();
+  state.autoRefreshTimer = window.setInterval(() => {
+    if (!state.authenticated || state.syncBusy) return;
+    pullBackendSync({
+      skipConfirm: true,
+      quiet: true,
+      mergeRemote: true,
+      preserveFocusedField: true,
+      background: true
+    }).catch((error) => {
+      console.warn("Background refresh failed", error);
+    });
+  }, SHARED_REFRESH_INTERVAL_MS);
+}
+
+function stopAutoRefresh() {
+  if (!state.autoRefreshTimer) return;
+  window.clearInterval(state.autoRefreshTimer);
+  state.autoRefreshTimer = null;
+}
+
 function logout() {
   state.editorPassword = "";
   dom.editorPasswordInput.value = "";
   dom.loginPasswordInput.value = "";
-  sessionStorage.removeItem(PASSWORD_SESSION_KEY);
+  forgetEditorPassword();
   showLogin();
+}
+
+function rememberEditorPassword(value) {
+  state.editorPassword = value;
+  sessionStorage.setItem(PASSWORD_SESSION_KEY, value);
+  try {
+    localStorage.setItem(PASSWORD_STORAGE_KEY, value);
+  } catch (error) {
+    console.warn("Could not persist editor password", error);
+  }
+}
+
+function savedEditorPassword() {
+  if (state.editorPassword) return state.editorPassword;
+  try {
+    const persisted = localStorage.getItem(PASSWORD_STORAGE_KEY);
+    if (persisted) return persisted;
+  } catch (error) {
+    console.warn("Could not read persisted editor password", error);
+  }
+  return sessionStorage.getItem(PASSWORD_SESSION_KEY) || "";
+}
+
+function forgetEditorPassword() {
+  sessionStorage.removeItem(PASSWORD_SESSION_KEY);
+  try {
+    localStorage.removeItem(PASSWORD_STORAGE_KEY);
+  } catch (error) {
+    console.warn("Could not clear persisted editor password", error);
+  }
 }
 
 function showLoginError(message) {
@@ -860,6 +918,11 @@ function renderDraftBrowser() {
   );
 }
 
+function renderDraftNavigation() {
+  renderDraftSelect();
+  renderDraftBrowser();
+}
+
 function filteredDrafts() {
   const query = state.draftSearch;
   return [...state.drafts]
@@ -1105,6 +1168,7 @@ async function saveForProcessing() {
   touchDraft(draft);
   clearPersistentError();
   renderStatus();
+  renderDraftNavigation();
   saveStateSoon();
 
   await pushBackendSync({
@@ -1164,6 +1228,7 @@ async function copyHtmlAndMarkExported() {
   draft.processingError = "";
   clearPersistentError();
   renderStatus();
+  renderDraftNavigation();
   await saveState();
 
   await pushBackendSync({
@@ -1244,7 +1309,7 @@ function backendEndpoint() {
 }
 
 function editorPassword() {
-  return state.editorPassword || sessionStorage.getItem(PASSWORD_SESSION_KEY) || dom.editorPasswordInput.value;
+  return savedEditorPassword() || dom.editorPasswordInput.value;
 }
 
 async function backendPost(payload) {
@@ -1335,23 +1400,27 @@ async function pullBackendSync(options = {}) {
     return false;
   }
 
-  setSyncBusy(true, "Refreshing shared work...");
+  const previousActiveId = state.activeId;
+  setSyncBusy(true, options.background ? "" : "Refreshing shared work...");
   try {
     const payload = await backendPost({ action: "loadSharedState" });
     if (!payload || !Array.isArray(payload.drafts)) throw new Error("Shared drafts file is invalid.");
 
-    state.drafts = payload.drafts.map(normalizeDraft).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+    const remoteDrafts = payload.drafts.map(normalizeDraft).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+    state.drafts = options.mergeRemote ? mergeRemoteDrafts(remoteDrafts) : remoteDrafts;
     if (!state.drafts.length) {
       state.drafts = [createDraft("New paper")];
     }
-    state.activeId = state.drafts[0]?.id || null;
-    state.volatileFiles.clear();
+    state.activeId = state.drafts.some((draft) => draft.id === previousActiveId)
+      ? previousActiveId
+      : state.drafts[0]?.id || null;
+    if (!options.mergeRemote) state.volatileFiles.clear();
 
     await idbClear("drafts");
-    await idbClear("files");
+    if (!options.mergeRemote) await idbClear("files");
     await saveState();
-    render();
-    setSyncStatus(`Loaded ${state.drafts.length} shared items.`);
+    renderAfterSharedRefresh(Boolean(options.preserveFocusedField));
+    if (!options.background) setSyncStatus(`Loaded ${state.drafts.length} shared items.`);
     if (!options.quiet) showToast("Shared work refreshed.");
     return true;
   } catch (error) {
@@ -1361,6 +1430,96 @@ async function pullBackendSync(options = {}) {
   } finally {
     setSyncBusy(false);
   }
+}
+
+function mergeRemoteDrafts(remoteDrafts) {
+  const localById = new Map(state.drafts.map((draft) => [draft.id, draft]));
+  const remoteIds = new Set(remoteDrafts.map((draft) => draft.id));
+  const merged = remoteDrafts.map((remoteDraft) => {
+    const localDraft = localById.get(remoteDraft.id);
+    if (!localDraft) return remoteDraft;
+    if (remoteDraft.id !== state.activeId) return remoteDraft;
+    return mergeActiveDraftFromRemote(localDraft, remoteDraft);
+  });
+
+  for (const localDraft of state.drafts) {
+    if (!remoteIds.has(localDraft.id)) merged.push(localDraft);
+  }
+
+  return merged.sort((a, b) => String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")));
+}
+
+function mergeActiveDraftFromRemote(localDraft, remoteDraft) {
+  const merged = { ...localDraft };
+  [
+    "status",
+    "queuedAt",
+    "processingStartedAt",
+    "processingRunId",
+    "processingError",
+    "processedAt",
+    "exportedAt",
+    "htmlCreatedAt"
+  ].forEach((field) => {
+    merged[field] = remoteDraft[field] || "";
+  });
+
+  if (shouldUseRemoteResult(localDraft, remoteDraft)) {
+    merged.result = remoteDraft.result || "";
+  }
+  if (shouldUseRemoteHtml(localDraft, remoteDraft)) {
+    merged.html = remoteDraft.html || "";
+  }
+
+  return normalizeDraft(merged);
+}
+
+function shouldUseRemoteResult(localDraft, remoteDraft) {
+  const remoteResult = String(remoteDraft.result || "");
+  if (!remoteResult.trim()) return false;
+  if (remoteDraft.processedAt && remoteDraft.processedAt !== localDraft.processedAt) return true;
+  const localStatus = normalizeStatus(localDraft.status);
+  const remoteStatus = normalizeStatus(remoteDraft.status);
+  return !String(localDraft.result || "").trim() || (
+    ["pending", "processing"].includes(localStatus) && remoteStatus === "done"
+  );
+}
+
+function shouldUseRemoteHtml(localDraft, remoteDraft) {
+  const remoteHtml = String(remoteDraft.html || "");
+  if (!remoteHtml.trim()) return false;
+  if (remoteDraft.exportedAt && remoteDraft.exportedAt !== localDraft.exportedAt) return true;
+  return !String(localDraft.html || "").trim();
+}
+
+function renderAfterSharedRefresh(preserveFocusedField) {
+  if (!preserveFocusedField || !isWorkspaceFormFieldFocused()) {
+    render();
+    return;
+  }
+
+  renderDraftNavigation();
+  renderStatus();
+  renderSharedOutputFields();
+}
+
+function isWorkspaceFormFieldFocused() {
+  const active = document.activeElement;
+  return Boolean(active && dom.app.contains(active) && active.matches("input, textarea, select"));
+}
+
+function renderSharedOutputFields() {
+  const draft = activeDraft();
+  syncFieldUnlessFocused(dom.llmResultInput, draft.result || "");
+  syncFieldUnlessFocused(dom.htmlOutput, draft.html || "");
+  if (document.activeElement !== dom.htmlOutput) {
+    dom.preview.innerHTML = draft.html || "<p></p>";
+  }
+}
+
+function syncFieldUnlessFocused(field, value) {
+  if (document.activeElement === field) return;
+  field.value = value;
 }
 
 function draftForRemote(draft) {
@@ -1387,6 +1546,7 @@ function sourceForRemoteFile(source) {
 }
 
 function setSyncBusy(isBusy, message = "") {
+  state.syncBusy = isBusy;
   dom.pullBackendButton.disabled = isBusy;
   dom.pushBackendButton.disabled = isBusy;
   dom.saveBackendButton.disabled = isBusy;
@@ -1845,7 +2005,7 @@ async function init() {
     render();
     switchSourceTab(state.activeSourceTab);
     registerServiceWorker();
-    const savedPassword = sessionStorage.getItem(PASSWORD_SESSION_KEY) || "";
+    const savedPassword = savedEditorPassword();
     if (savedPassword) {
       dom.loginPasswordInput.value = savedPassword;
       await loginWithPassword(savedPassword);
