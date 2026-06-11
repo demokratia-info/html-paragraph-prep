@@ -15,6 +15,10 @@ const STATE_PATH = `${DATA_BASE_PATH}/drafts.json`;
 const MAX_PENDING_PER_RUN = clamp(Number(process.env.MAX_PENDING_PER_RUN || 1), 1, 20);
 const MAX_SOURCE_CHARS = clamp(Number(process.env.MAX_SOURCE_CHARS || 120000), 1000, 500000);
 const CODEX_TIMEOUT_MS = clamp(Number(process.env.CODEX_TIMEOUT_MS || 45 * 60 * 1000), 60 * 1000, 3 * 60 * 60 * 1000);
+const OCR_MAX_PAGES = clamp(Number(process.env.OCR_MAX_PAGES || 25), 1, 200);
+const OCR_DPI = clamp(Number(process.env.OCR_DPI || 220), 100, 400);
+const OCR_LANGS = String(process.env.OCR_LANGS || "heb+eng").trim() || "heb+eng";
+const OCR_PSM = String(process.env.OCR_PSM || "6").trim() || "6";
 const PROCESSING_ROOT = path.join(REPO_ROOT, ".codex-processing");
 const GH_BIN = commandPath("gh");
 const CODEX_BIN = commandPath("codex");
@@ -117,11 +121,11 @@ function prepareSources(draft, workDir) {
         const localPath = path.join(workDir, "sources", filename);
         fs.writeFileSync(localPath, raw);
         prepared.localPath = localPath;
-        const extractedText = extractLocalText(localPath, source);
-        if (extractedText) {
-          prepared.extractedText = extractedText;
+        const extraction = extractLocalText(localPath, source);
+        if (extraction.text) {
+          prepared.extractedText = extraction.text;
         } else if (textExtractionExpected(source)) {
-          prepared.extractionError = "Local text extraction did not produce readable text.";
+          prepared.extractionError = extraction.error || "Local text extraction did not produce readable text.";
         }
       } catch (error) {
         prepared.localPathError = error?.message || String(error);
@@ -225,16 +229,33 @@ function extractLocalText(localPath, source) {
   const filename = String(source.filename || localPath).toLowerCase();
   const mimeType = String(source.mimeType || "").toLowerCase();
   if (filename.endsWith(".pdf") || mimeType === "application/pdf") {
-    return runTextCommand("pdftotext", ["-layout", "-enc", "UTF-8", localPath, "-"]);
+    const extracted = runTextCommand("pdftotext", ["-layout", "-enc", "UTF-8", localPath, "-"]);
+    if (extracted.text) return extracted;
+    const ocr = ocrPdfToText(localPath);
+    if (ocr.text) return ocr;
+    return {
+      text: "",
+      error: [
+        extracted.error || "pdftotext did not produce readable text.",
+        ocr.error || "OCR did not produce readable text."
+      ].join(" ")
+    };
   }
   if (filename.endsWith(".docx") || mimeType.includes("officedocument.wordprocessingml.document")) {
     const xml = runTextCommand("unzip", ["-p", localPath, "word/document.xml"]);
-    return xmlToText(xml);
+    if (!xml.text) return xml;
+    const text = xmlToText(xml.text);
+    return isUsefulExtractedText(text)
+      ? { text, error: "" }
+      : { text: "", error: "Word file text extraction did not produce readable text." };
   }
   if (/\.(txt|md|markdown|csv|json|html?|rtf)$/i.test(filename) || mimeType.startsWith("text/")) {
-    return fs.readFileSync(localPath, "utf8");
+    const text = normalizeExtractedText(fs.readFileSync(localPath, "utf8"));
+    return isUsefulExtractedText(text)
+      ? { text, error: "" }
+      : { text: "", error: "Text file did not contain enough readable text." };
   }
-  return "";
+  return { text: "", error: "" };
 }
 
 function textExtractionExpected(source) {
@@ -253,21 +274,95 @@ function textExtractionExpected(source) {
 }
 
 function runTextCommand(command, args) {
-  if (!commandExists(command)) return "";
-  const result = spawnSync(command, args, {
+  const binary = optionalCommandPath(command);
+  if (!binary) return { text: "", error: `${command} is not installed.` };
+  const result = spawnSync(binary, args, {
     cwd: REPO_ROOT,
     encoding: "utf8",
     timeout: 60 * 1000,
     maxBuffer: 20 * 1024 * 1024
   });
-  if (result.error || result.status !== 0) return "";
+  if (result.error) return { text: "", error: result.error.message || String(result.error) };
+  if (result.status !== 0) {
+    return { text: "", error: commandError(command, result) };
+  }
   const text = normalizeExtractedText(result.stdout || "");
-  return isUsefulExtractedText(text) ? text : "";
+  return isUsefulExtractedText(text)
+    ? { text, error: "" }
+    : { text: "", error: `${command} did not produce readable text.` };
 }
 
-function commandExists(command) {
+function ocrPdfToText(localPath) {
+  const pdftoppm = optionalCommandPath("pdftoppm");
+  const tesseract = optionalCommandPath("tesseract");
+  if (!pdftoppm) return { text: "", error: "OCR support is missing pdftoppm." };
+  if (!tesseract) {
+    return {
+      text: "",
+      error: "OCR support is missing tesseract. Install tesseract-ocr and tesseract-ocr-heb."
+    };
+  }
+
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "summary-html-desk-ocr-"));
+  try {
+    const imagePrefix = path.join(tempDir, "page");
+    const render = spawnSync(pdftoppm, [
+      "-r", String(OCR_DPI),
+      "-png",
+      "-f", "1",
+      "-l", String(OCR_MAX_PAGES),
+      localPath,
+      imagePrefix
+    ], {
+      cwd: REPO_ROOT,
+      encoding: "utf8",
+      timeout: 3 * 60 * 1000,
+      maxBuffer: 20 * 1024 * 1024
+    });
+    if (render.error) return { text: "", error: render.error.message || String(render.error) };
+    if (render.status !== 0) return { text: "", error: commandError("pdftoppm", render) };
+
+    const images = fs.readdirSync(tempDir)
+      .filter((name) => /^page-\d+\.png$/i.test(name))
+      .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))
+      .map((name) => path.join(tempDir, name));
+    if (!images.length) return { text: "", error: "OCR rendering did not create page images." };
+
+    const pageTexts = [];
+    for (const imagePath of images) {
+      const page = spawnSync(tesseract, [imagePath, "stdout", "-l", OCR_LANGS, "--psm", OCR_PSM], {
+        cwd: REPO_ROOT,
+        encoding: "utf8",
+        timeout: 3 * 60 * 1000,
+        maxBuffer: 20 * 1024 * 1024
+      });
+      if (page.error) return { text: "", error: page.error.message || String(page.error) };
+      if (page.status !== 0) return { text: "", error: commandError("tesseract", page) };
+      pageTexts.push(page.stdout || "");
+    }
+
+    const text = normalizeExtractedText(pageTexts.join("\n\n"));
+    return isUsefulExtractedText(text)
+      ? { text, error: "" }
+      : { text: "", error: "OCR ran but did not produce readable text." };
+  } finally {
+    if (process.env.KEEP_OCR_TEMP !== "1") {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  }
+}
+
+function commandError(command, result) {
+  const details = [result.stderr, result.stdout]
+    .filter(Boolean)
+    .join("\n")
+    .trim();
+  return details || `${command} exited with status ${result.status}`;
+}
+
+function optionalCommandPath(command) {
   const result = spawnSync("bash", ["-lc", `command -v ${command}`], { encoding: "utf8" });
-  return result.status === 0;
+  return result.status === 0 ? result.stdout.trim() : "";
 }
 
 function xmlToText(xml) {
