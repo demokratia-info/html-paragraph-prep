@@ -19,6 +19,8 @@ const OCR_MAX_PAGES = clamp(Number(process.env.OCR_MAX_PAGES || 25), 1, 200);
 const OCR_DPI = clamp(Number(process.env.OCR_DPI || 220), 100, 400);
 const OCR_LANGS = String(process.env.OCR_LANGS || "heb+eng").trim() || "heb+eng";
 const OCR_PSM = String(process.env.OCR_PSM || "6").trim() || "6";
+const DEFAULT_DRAFT_TITLES = new Set(["", "מקור חדש", "מורק חדש", "New paper", "Untitled summary", "CMS summary"]);
+const TITLE_MAX_CHARS = 90;
 const PROCESSING_ROOT = path.join(REPO_ROOT, ".codex-processing");
 const GH_BIN = commandPath("gh");
 const CODEX_BIN = commandPath("codex");
@@ -88,9 +90,13 @@ async function processDraft(state, draft) {
     runCodex(prompt, resultPath);
     const resultText = readResultText(resultPath);
     if (!resultText) throw new Error("Codex finished without returning summary text.");
+    const derivedTitle = deriveTitleFromSources(preparedSources);
 
     finalizeDraft(draft.id, runId, (freshDraft) => {
       freshDraft.result = resultText;
+      if (shouldReplaceDraftTitle(freshDraft.title) && derivedTitle) {
+        freshDraft.title = derivedTitle;
+      }
       freshDraft.status = "done";
       freshDraft.processedAt = new Date().toISOString();
       freshDraft.processingStartedAt = "";
@@ -141,6 +147,75 @@ function prepareSources(draft, workDir) {
     }
     return prepared;
   });
+}
+
+function shouldReplaceDraftTitle(title) {
+  return DEFAULT_DRAFT_TITLES.has(String(title || "").trim());
+}
+
+function deriveTitleFromSources(sources) {
+  for (const source of sources || []) {
+    const title = deriveTitleFromText(source.extractedText || source.text || "");
+    if (title) return title;
+  }
+  return "";
+}
+
+function deriveTitleFromText(text) {
+  const lines = normalizeExtractedText(text)
+    .split(/\n/)
+    .map(cleanTitleLine)
+    .filter(Boolean)
+    .slice(0, 80);
+
+  for (const line of lines) {
+    if (/הנדון/.test(line)) {
+      const title = titleCandidate(line.replace(/^.*?הנדון\s*[:：\-–—]?\s*/, ""));
+      if (title) return title;
+    }
+  }
+
+  for (const line of lines) {
+    const title = titleCandidate(line);
+    if (title) return title;
+  }
+  return "";
+}
+
+function cleanTitleLine(line) {
+  return String(line || "")
+    .replace(/[\u200e\u200f\u202a-\u202e\u2066-\u2069]/g, "")
+    .replace(/[ \t]+/g, " ")
+    .trim();
+}
+
+function titleCandidate(line) {
+  let value = cleanTitleLine(line)
+    .replace(/^[-–—•*.\s\d()]+/, "")
+    .replace(/\s*[|:：\-–—]\s*$/, "")
+    .trim();
+  if (!value) return "";
+  if (isGenericTitleLine(value) || isDateLikeTitleLine(value)) return "";
+
+  const letterCount = (value.match(/\p{L}/gu) || []).length;
+  if (letterCount < 8) return "";
+
+  if (value.length > TITLE_MAX_CHARS) {
+    value = `${value.slice(0, TITLE_MAX_CHARS - 1).trim()}…`;
+  }
+  return value;
+}
+
+function isGenericTitleLine(value) {
+  const normalized = value.replace(/[^\p{L}\p{N}]+/gu, " ").trim();
+  return /^(לכבוד|עמוד|תוכן עניינים|page)$/i.test(normalized)
+    || (/^נייר עמדה\b/.test(normalized) && normalized.length < 40);
+}
+
+function isDateLikeTitleLine(value) {
+  const monthNames = "ינואר|פברואר|מרץ|אפריל|מאי|יוני|יולי|אוגוסט|ספטמבר|אוקטובר|נובמבר|דצמבר";
+  const wordCount = value.split(/\s+/).filter(Boolean).length;
+  return wordCount <= 4 && new RegExp(`\\d.*(${monthNames})|(${monthNames}).*\\d`).test(value);
 }
 
 function downloadUrlSource(source, index, workDir) {

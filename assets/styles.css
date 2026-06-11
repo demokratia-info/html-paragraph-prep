@@ -184,11 +184,6 @@ summary {
   letter-spacing: 0;
 }
 
-.source-toolbar {
-  display: flex;
-  justify-content: flex-end;
-}
-
 .field {
   display: flex;
   flex-direction: column;
@@ -235,6 +230,11 @@ textarea#llmResultInput {
   direction: rtl;
   text-align: right;
   line-height: 1.7;
+}
+
+#draftTitleInput {
+  direction: rtl;
+  text-align: right;
 }
 
 textarea#promptOutput,
@@ -618,6 +618,15 @@ textarea:focus {
 
 .grow {
   flex: 1;
+}
+
+.panel-brief .result-field {
+  min-height: 0;
+}
+
+.panel-brief #llmResultInput {
+  flex: 1;
+  min-height: 420px;
 }
 
 .preview-shell {

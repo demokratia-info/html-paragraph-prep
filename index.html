@@ -100,13 +100,16 @@
       </section>
 
       <section class="panel panel-source" aria-label="Source and prompt">
-        <div class="source-toolbar">
+        <div class="panel-heading">
+          <div>
+            <h2>Add a source</h2>
+          </div>
           <button class="icon-button danger" id="deleteDraftButton" type="button" title="Delete source" aria-label="Delete source">×</button>
         </div>
 
         <label class="field">
           <span>Source title</span>
-          <input id="draftTitleInput" type="text" autocomplete="off" spellcheck="true">
+          <input id="draftTitleInput" type="text" dir="rtl" autocomplete="off" spellcheck="true">
         </label>
 
         <div class="status-panel" aria-label="Item status">
@@ -180,8 +183,7 @@
       <section class="panel panel-brief" aria-labelledby="briefTitle">
         <div class="panel-heading">
           <div>
-            <h2 id="briefTitle">Summary Text</h2>
-            <p>Result and edits</p>
+            <h2 id="briefTitle">Results and edits</h2>
           </div>
         </div>
 
@@ -213,8 +215,8 @@
           <pre id="errorText"></pre>
         </div>
 
-        <label class="field grow">
-          <span>Result</span>
+        <label class="field grow result-field">
+          <span class="visually-hidden">Result</span>
           <textarea id="llmResultInput" rows="11" dir="rtl" spellcheck="true"></textarea>
         </label>
       </section>

@@ -10,6 +10,8 @@ const PASSWORD_STORAGE_KEY = "summary-html-desk.editor-password.local";
 const MAX_PROMPT_SOURCE_CHARS = 80000;
 const MAX_BINARY_FILE_BYTES = 18 * 1024 * 1024;
 const SHARED_REFRESH_INTERVAL_MS = 60 * 1000;
+const DEFAULT_DRAFT_TITLE = "מקור חדש";
+const DEFAULT_DRAFT_TITLES = new Set(["", DEFAULT_DRAFT_TITLE, "מורק חדש", "New paper", "Untitled summary", "CMS summary"]);
 const DEFAULT_SUMMARY_OPTIONS = {
   language: "Hebrew",
   shape: "paragraphs",
@@ -130,7 +132,7 @@ function createId() {
   return `id-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
-function createDraft(title = "Untitled summary") {
+function createDraft(title = DEFAULT_DRAFT_TITLE) {
   const now = new Date().toISOString();
   return {
     id: createId(),
@@ -175,7 +177,7 @@ async function loadState() {
   state.activeId = active?.value || state.drafts[0]?.id || null;
 
   if (!state.drafts.length) {
-    const draft = createDraft("CMS summary");
+    const draft = createDraft();
     state.drafts.push(draft);
     state.activeId = draft.id;
     await saveState();
@@ -339,7 +341,7 @@ function bindEvents() {
   dom.logoutButton.addEventListener("click", logout);
 
   dom.newDraftButton.addEventListener("click", () => {
-    const draft = createDraft("New paper");
+    const draft = createDraft();
     state.drafts.unshift(draft);
     state.activeId = draft.id;
     render();
@@ -381,7 +383,7 @@ function bindEvents() {
 
   dom.draftTitleInput.addEventListener("input", () => {
     const draft = activeDraft();
-    draft.title = dom.draftTitleInput.value.trimStart() || "Untitled summary";
+    draft.title = dom.draftTitleInput.value.trimStart();
     touchDraft(draft);
     renderDraftSelect();
     renderDraftBrowser();
@@ -825,7 +827,7 @@ function renderDraftSelect() {
     ...draftsForOptions.map((draft) => {
       const option = document.createElement("option");
       option.value = draft.id;
-      option.textContent = `${draft.title || "Untitled summary"} · ${statusLabel(draft.status)} · ${draft.sources.length} sources`;
+      option.textContent = `${draft.title || DEFAULT_DRAFT_TITLE} · ${statusLabel(draft.status)} · ${draft.sources.length} sources`;
       return option;
     })
   );
@@ -856,7 +858,7 @@ function renderDraftBrowser() {
       const top = document.createElement("div");
       top.className = "draft-card-top";
       const title = document.createElement("strong");
-      title.textContent = draft.title || "Untitled summary";
+      title.textContent = draft.title || DEFAULT_DRAFT_TITLE;
       const badge = document.createElement("span");
       badge.className = `status-badge status-${normalizeStatus(draft.status)}`;
       badge.textContent = statusLabel(draft.status);
@@ -1371,7 +1373,7 @@ async function pullBackendSync(options = {}) {
     const remoteDrafts = payload.drafts.map(normalizeDraft).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
     state.drafts = options.mergeRemote ? mergeRemoteDrafts(remoteDrafts) : remoteDrafts;
     if (!state.drafts.length) {
-      state.drafts = [createDraft("New paper")];
+      state.drafts = [createDraft()];
     }
     state.activeId = state.drafts.some((draft) => draft.id === previousActiveId)
       ? previousActiveId
@@ -1432,8 +1434,22 @@ function mergeActiveDraftFromRemote(localDraft, remoteDraft) {
   if (shouldUseRemoteHtml(localDraft, remoteDraft)) {
     merged.html = remoteDraft.html || "";
   }
+  if (shouldUseRemoteTitle(localDraft, remoteDraft)) {
+    merged.title = remoteDraft.title || "";
+  }
 
   return normalizeDraft(merged);
+}
+
+function shouldUseRemoteTitle(localDraft, remoteDraft) {
+  const remoteTitle = String(remoteDraft.title || "").trim();
+  return Boolean(remoteTitle)
+    && isDefaultDraftTitle(localDraft.title)
+    && !isDefaultDraftTitle(remoteTitle);
+}
+
+function isDefaultDraftTitle(title) {
+  return DEFAULT_DRAFT_TITLES.has(String(title || "").trim());
 }
 
 function shouldUseRemoteResult(localDraft, remoteDraft) {
@@ -1472,6 +1488,7 @@ function isWorkspaceFormFieldFocused() {
 
 function renderSharedOutputFields() {
   const draft = activeDraft();
+  syncFieldUnlessFocused(dom.draftTitleInput, draft.title || "");
   syncFieldUnlessFocused(dom.llmResultInput, draft.result || "");
   syncFieldUnlessFocused(dom.htmlOutput, draft.html || "");
   if (document.activeElement !== dom.htmlOutput) {
