@@ -160,6 +160,7 @@ async function loadState() {
   if (savedSettings?.value && typeof savedSettings.value === "object") {
     state.settings = { ...state.settings, ...savedSettings.value };
   }
+  state.settings.proxyEndpoint = DEFAULT_BACKEND_ENDPOINT;
 
   const active = await idbGet("settings", "active-id");
   state.activeId = active?.value || state.drafts[0]?.id || null;
@@ -668,8 +669,8 @@ function render() {
   dom.toneSelect.value = draft.tone;
   dom.includeLinksCheckbox.checked = draft.includeLinks;
   dom.promptOutput.value = draft.prompt || buildPrompt(draft);
-  dom.proxyEndpointInput.value = state.settings.proxyEndpoint || DEFAULT_BACKEND_ENDPOINT;
-  dom.backendEndpointInput.value = state.settings.proxyEndpoint || DEFAULT_BACKEND_ENDPOINT;
+  dom.proxyEndpointInput.value = DEFAULT_BACKEND_ENDPOINT;
+  dom.backendEndpointInput.value = DEFAULT_BACKEND_ENDPOINT;
   dom.llmResultInput.value = draft.result || "";
   dom.htmlOutput.value = draft.html || "";
   dom.preview.dir = draft.direction || "auto";
@@ -1103,7 +1104,7 @@ async function sourceForProxy(source) {
 }
 
 function backendEndpoint() {
-  return (dom.backendEndpointInput.value.trim() || state.settings.proxyEndpoint || DEFAULT_BACKEND_ENDPOINT).trim();
+  return DEFAULT_BACKEND_ENDPOINT;
 }
 
 function editorPassword() {
@@ -1132,17 +1133,9 @@ async function backendPost(payload) {
 }
 
 async function saveBackendSettings() {
-  const endpoint = dom.backendEndpointInput.value.trim() || DEFAULT_BACKEND_ENDPOINT;
-  if (endpoint) {
-    try {
-      new URL(endpoint);
-    } catch {
-      showToast("Shared storage address is not valid.");
-      return;
-    }
-  }
-  state.settings.proxyEndpoint = endpoint;
-  dom.proxyEndpointInput.value = endpoint;
+  state.settings.proxyEndpoint = DEFAULT_BACKEND_ENDPOINT;
+  dom.proxyEndpointInput.value = DEFAULT_BACKEND_ENDPOINT;
+  dom.backendEndpointInput.value = DEFAULT_BACKEND_ENDPOINT;
   await saveState();
   setSyncStatus("Shared storage saved. Editor password is not stored.");
   showToast("Shared storage saved.");
@@ -1403,19 +1396,11 @@ function sanitizeHref(href) {
 }
 
 async function saveProxyEndpoint() {
-  const value = dom.proxyEndpointInput.value.trim() || DEFAULT_BACKEND_ENDPOINT;
-  if (value) {
-    try {
-      new URL(value);
-    } catch {
-      showToast("Endpoint URL is not valid.");
-      return;
-    }
-  }
-  state.settings.proxyEndpoint = value;
-  dom.backendEndpointInput.value = value;
+  state.settings.proxyEndpoint = DEFAULT_BACKEND_ENDPOINT;
+  dom.proxyEndpointInput.value = DEFAULT_BACKEND_ENDPOINT;
+  dom.backendEndpointInput.value = DEFAULT_BACKEND_ENDPOINT;
   await saveState();
-  showToast("Endpoint saved.");
+  showToast("Shared storage saved.");
 }
 
 function togglePreviewDirection() {
