@@ -1,0 +1,17 @@
+{
+  "name": "Summary HTML Desk",
+  "short_name": "HTML Desk",
+  "description": "Private source-to-CMS workspace for HTML summaries.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f6f7f9",
+  "theme_color": "#0f766e",
+  "icons": [
+    {
+      "src": "./assets/favicon.svg",
+      "sizes": "64x64",
+      "type": "image/svg+xml"
+    }
+  ]
+}

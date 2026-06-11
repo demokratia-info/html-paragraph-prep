@@ -1,0 +1,20 @@
+name = "summary-html-desk-openai"
+main = "openai-summary-worker.js"
+compatibility_date = "2026-06-11"
+
+[vars]
+# Set this to your GitHub Pages URL after publishing.
+ALLOWED_ORIGIN = "https://YOUR-GITHUB-USERNAME.github.io"
+# Private data repo used by the Worker.
+GITHUB_OWNER = "demokratia-info"
+GITHUB_REPO = "html-paragraph-prep-data"
+GITHUB_BRANCH = "main"
+GITHUB_BASE_PATH = "summary-html-desk"
+# Override only if you want a different model.
+OPENAI_MODEL = "gpt-5.5"
+MAX_OUTPUT_TOKENS = "2400"
+
+# Secrets:
+# EDITOR_PASSWORD or EDITOR_PASSWORD_SHA256
+# GITHUB_TOKEN
+# OPENAI_API_KEY
