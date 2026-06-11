@@ -69,7 +69,7 @@ wrangler secret put OPENAI_API_KEY
 wrangler deploy
 ```
 
-The app is preconfigured for `https://summary-html-desk-openai.demokratia-info.workers.dev`. If the deployed Worker URL is different, update `DEFAULT_BACKEND_ENDPOINT` in `assets/app.js` or paste the URL in **Advanced backend endpoint** inside the app.
+The app is preconfigured for `https://summary-html-desk-openai.demokratia-info.workers.dev`. If the deployed Worker URL is different, update `DEFAULT_BACKEND_ENDPOINT` in `assets/app.js`.
 
 The Worker uses the OpenAI Responses API, supports text inputs, public document file URLs, private uploaded PDF/Word files stored in the data repo, and optional web search for ordinary URLs.
 
