@@ -36,6 +36,8 @@ export default {
           return json(await loadSharedState(env), 200, corsHeaders);
         case "getSourceFile":
           return json(await getSourceFile(payload, env), 200, corsHeaders);
+        case "checkStorage":
+          return json(await checkStorage(env), 200, corsHeaders);
         default:
           return json({ error: "Unknown action." }, 400, corsHeaders);
       }
@@ -204,6 +206,29 @@ async function getSourceFile(payload, env) {
   };
 }
 
+async function checkStorage(env) {
+  const config = githubConfig(env);
+  const repo = await githubGetRepo(config);
+  const stateItem = await githubGetContent(config, sharedStatePath(config));
+  const testPath = `${config.basePath}/diagnostics/worker-write-test.txt`;
+  await githubPutContent(
+    config,
+    testPath,
+    utf8ToBase64(`Worker storage test at ${new Date().toISOString()}\n`),
+    "Test summary desk storage access"
+  );
+  return {
+    ok: true,
+    owner: config.owner,
+    repo: config.repo,
+    branch: config.branch,
+    basePath: config.basePath,
+    private: Boolean(repo?.private),
+    sharedStateExists: Boolean(stateItem?.content),
+    testPath
+  };
+}
+
 function buildInstructions(payload, options, sources) {
   const language = options.language === "same"
     ? "the same language as the source material"
@@ -267,7 +292,18 @@ async function githubGetContent(config, path) {
   if (response.status === 404) return null;
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) {
-    throw httpError(payload.message || `GitHub returned ${response.status}`, response.status);
+    throw httpError(githubErrorMessage(payload, response.status), response.status);
+  }
+  return payload;
+}
+
+async function githubGetRepo(config) {
+  const response = await fetch(`https://api.github.com/repos/${encodeURIComponent(config.owner)}/${encodeURIComponent(config.repo)}`, {
+    headers: githubHeaders(config)
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw httpError(githubErrorMessage(payload, response.status), response.status);
   }
   return payload;
 }
@@ -288,7 +324,7 @@ async function githubPutContent(config, path, base64Content, message) {
   });
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) {
-    throw httpError(payload.message || `GitHub returned ${response.status}`, response.status);
+    throw httpError(githubErrorMessage(payload, response.status), response.status);
   }
   return payload;
 }
@@ -305,8 +341,15 @@ function githubHeaders(config) {
     "Accept": "application/vnd.github+json",
     "Authorization": `Bearer ${config.token}`,
     "Content-Type": "application/json",
+    "User-Agent": "summary-html-desk-worker",
     "X-GitHub-Api-Version": "2022-11-28"
   };
+}
+
+function githubErrorMessage(payload, status) {
+  const message = payload?.message || `GitHub returned ${status}`;
+  const detail = payload?.documentation_url ? ` See ${payload.documentation_url}` : "";
+  return `${message} (GitHub ${status}).${detail}`;
 }
 
 async function requireEditorPassword(request, payload, env) {
