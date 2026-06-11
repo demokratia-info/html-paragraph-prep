@@ -67,6 +67,15 @@ async function processDraft(state, draft) {
 
   try {
     const preparedSources = prepareSources(draftInState, workDir);
+    const unreadableFiles = preparedSources.filter((source) => source.extractionError && !source.text && !source.extractedText);
+    if (unreadableFiles.length && unreadableFiles.length === preparedSources.length) {
+      throw new Error([
+        "The uploaded file could not be converted to readable text before calling Codex.",
+        "This usually means the PDF is scanned/image-based or uses text encoding that pdftotext cannot extract.",
+        "Upload a text-selectable PDF, Word file, or extracted text version, or add OCR support to this machine.",
+        `File: ${unreadableFiles.map((source) => source.filename || source.title || "source file").join(", ")}`
+      ].join(" "));
+    }
     const prompt = buildCodexPrompt(draftInState, preparedSources);
     const promptPath = path.join(workDir, "prompt.txt");
     const resultPath = path.join(workDir, "result.txt");
@@ -108,6 +117,12 @@ function prepareSources(draft, workDir) {
         const localPath = path.join(workDir, "sources", filename);
         fs.writeFileSync(localPath, raw);
         prepared.localPath = localPath;
+        const extractedText = extractLocalText(localPath, source);
+        if (extractedText) {
+          prepared.extractedText = extractedText;
+        } else if (textExtractionExpected(source)) {
+          prepared.extractionError = "Local text extraction did not produce readable text.";
+        }
       } catch (error) {
         prepared.localPathError = error?.message || String(error);
       }
@@ -182,8 +197,15 @@ function formatSourceForCodex(source, index) {
   if (source.url) lines.push(`URL: ${source.url}`);
   if (source.filename) lines.push(`Original file name: ${source.filename}`);
   if (source.localPath) {
-    lines.push(`Local file path: ${source.localPath}`);
-    lines.push("Read this local file if needed before summarizing.");
+    if (source.extractedText) {
+      lines.push(`Extracted text from local file ${source.localPath}:`);
+      lines.push(clipText(source.extractedText, MAX_SOURCE_CHARS));
+    } else if (source.extractionError) {
+      lines.push(`Text extraction note: ${source.extractionError}`);
+    } else {
+      lines.push(`Local file path: ${source.localPath}`);
+      lines.push("Read this local file if needed before summarizing.");
+    }
   } else if (source.localPathError) {
     lines.push(`Stored file could not be downloaded: ${source.localPathError}`);
   } else if (source.remoteFilePath) {
@@ -197,6 +219,82 @@ function formatSourceForCodex(source, index) {
     lines.push("Open or search this URL if your environment allows it. If it cannot be accessed, say that source text is needed instead of guessing.");
   }
   return lines.join("\n");
+}
+
+function extractLocalText(localPath, source) {
+  const filename = String(source.filename || localPath).toLowerCase();
+  const mimeType = String(source.mimeType || "").toLowerCase();
+  if (filename.endsWith(".pdf") || mimeType === "application/pdf") {
+    return runTextCommand("pdftotext", ["-layout", "-enc", "UTF-8", localPath, "-"]);
+  }
+  if (filename.endsWith(".docx") || mimeType.includes("officedocument.wordprocessingml.document")) {
+    const xml = runTextCommand("unzip", ["-p", localPath, "word/document.xml"]);
+    return xmlToText(xml);
+  }
+  if (/\.(txt|md|markdown|csv|json|html?|rtf)$/i.test(filename) || mimeType.startsWith("text/")) {
+    return fs.readFileSync(localPath, "utf8");
+  }
+  return "";
+}
+
+function textExtractionExpected(source) {
+  const filename = String(source.filename || "").toLowerCase();
+  const mimeType = String(source.mimeType || "").toLowerCase();
+  return filename.endsWith(".pdf")
+    || filename.endsWith(".docx")
+    || filename.endsWith(".txt")
+    || filename.endsWith(".md")
+    || filename.endsWith(".markdown")
+    || filename.endsWith(".html")
+    || filename.endsWith(".htm")
+    || mimeType === "application/pdf"
+    || mimeType.includes("officedocument.wordprocessingml.document")
+    || mimeType.startsWith("text/");
+}
+
+function runTextCommand(command, args) {
+  if (!commandExists(command)) return "";
+  const result = spawnSync(command, args, {
+    cwd: REPO_ROOT,
+    encoding: "utf8",
+    timeout: 60 * 1000,
+    maxBuffer: 20 * 1024 * 1024
+  });
+  if (result.error || result.status !== 0) return "";
+  const text = normalizeExtractedText(result.stdout || "");
+  return isUsefulExtractedText(text) ? text : "";
+}
+
+function commandExists(command) {
+  const result = spawnSync("bash", ["-lc", `command -v ${command}`], { encoding: "utf8" });
+  return result.status === 0;
+}
+
+function xmlToText(xml) {
+  return normalizeExtractedText(String(xml || "")
+    .replace(/<w:tab\/>/g, "\t")
+    .replace(/<w:br\/>/g, "\n")
+    .replace(/<\/w:p>/g, "\n")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&amp;/g, "&")
+    .replace(/&quot;/g, "\"")
+    .replace(/&apos;/g, "'"));
+}
+
+function normalizeExtractedText(text) {
+  return String(text || "")
+    .replace(/\r\n?/g, "\n")
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n{4,}/g, "\n\n\n")
+    .trim();
+}
+
+function isUsefulExtractedText(text) {
+  const value = String(text || "");
+  const wordChars = (value.match(/[\p{L}\p{N}]/gu) || []).length;
+  return value.length >= 80 && wordChars >= 40;
 }
 
 function defaultPromptFromDraft(draft) {
