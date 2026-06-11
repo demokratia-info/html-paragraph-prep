@@ -7,6 +7,33 @@ const DB_VERSION = 1;
 const DEFAULT_BACKEND_ENDPOINT = "https://summary-html-desk-openai.demokratia-info.workers.dev";
 const MAX_PROMPT_SOURCE_CHARS = 80000;
 const MAX_BINARY_FILE_BYTES = 18 * 1024 * 1024;
+const VALID_STATUSES = new Set(["draft", "pending", "processing", "done", "error", "exported"]);
+const STATUS_TEXT = {
+  draft: {
+    label: "Draft",
+    detail: "Not sent for processing yet"
+  },
+  pending: {
+    label: "Waiting",
+    detail: "Saved and waiting for Codex"
+  },
+  processing: {
+    label: "Processing",
+    detail: "Codex is working on this item"
+  },
+  done: {
+    label: "Ready",
+    detail: "Summary text is ready to edit"
+  },
+  error: {
+    label: "Needs Attention",
+    detail: "Processing failed. Check the error message."
+  },
+  exported: {
+    label: "Exported",
+    detail: "HTML was copied for the CMS"
+  }
+};
 
 const state = {
   drafts: [],
@@ -16,6 +43,7 @@ const state = {
     proxyEndpoint: DEFAULT_BACKEND_ENDPOINT
   },
   draftSearch: "",
+  draftStatusFilter: "all",
   activeSourceTab: "text",
   saveTimer: null,
   toastTimer: null,
@@ -29,6 +57,8 @@ const dom = {
   draftTitleInput: $("#draftTitleInput"),
   draftSelect: $("#draftSelect"),
   draftSearchInput: $("#draftSearchInput"),
+  draftStatusFilterInput: $("#draftStatusFilterInput"),
+  draftBrowser: $("#draftBrowser"),
   backendEndpointInput: $("#backendEndpointInput"),
   editorPasswordInput: $("#editorPasswordInput"),
   saveBackendButton: $("#saveBackendButton"),
@@ -40,6 +70,11 @@ const dom = {
   exportDraftsButton: $("#exportDraftsButton"),
   importDraftsInput: $("#importDraftsInput"),
   saveStatus: $("#saveStatus"),
+  statusBadge: $("#statusBadge"),
+  statusUpdated: $("#statusUpdated"),
+  modifiedTime: $("#modifiedTime"),
+  processedTime: $("#processedTime"),
+  exportedTime: $("#exportedTime"),
   sourceCount: $("#sourceCount"),
   sourceChars: $("#sourceChars"),
   textSourceTitleInput: $("#textSourceTitleInput"),
@@ -97,6 +132,14 @@ function createDraft(title = "Untitled summary") {
     result: "",
     html: "",
     direction: "auto",
+    status: "draft",
+    queuedAt: "",
+    processingStartedAt: "",
+    processedAt: "",
+    exportedAt: "",
+    htmlCreatedAt: "",
+    processingError: "",
+    processingRunId: "",
     createdAt: now,
     updatedAt: now
   };
@@ -131,11 +174,25 @@ async function loadState() {
 
 function normalizeDraft(draft) {
   const fresh = createDraft();
-  return {
+  const normalized = {
     ...fresh,
     ...draft,
     sources: Array.isArray(draft.sources) ? draft.sources.map(normalizeSource) : []
   };
+  normalized.status = normalizeStatus(normalized.status);
+  normalized.queuedAt = normalized.queuedAt || "";
+  normalized.processingStartedAt = normalized.processingStartedAt || "";
+  normalized.processedAt = normalized.processedAt || "";
+  normalized.exportedAt = normalized.exportedAt || "";
+  normalized.htmlCreatedAt = normalized.htmlCreatedAt || "";
+  normalized.processingError = normalized.processingError || "";
+  normalized.processingRunId = normalized.processingRunId || "";
+  return normalized;
+}
+
+function normalizeStatus(status) {
+  const value = String(status || "draft").trim();
+  return VALID_STATUSES.has(value) ? value : "draft";
 }
 
 function normalizeSource(source) {
@@ -295,6 +352,13 @@ function bindEvents() {
   dom.draftSearchInput.addEventListener("input", () => {
     state.draftSearch = dom.draftSearchInput.value.trim().toLowerCase();
     renderDraftSelect();
+    renderDraftBrowser();
+  });
+
+  dom.draftStatusFilterInput.addEventListener("change", () => {
+    state.draftStatusFilter = dom.draftStatusFilterInput.value;
+    renderDraftSelect();
+    renderDraftBrowser();
   });
 
   dom.draftTitleInput.addEventListener("input", () => {
@@ -309,7 +373,7 @@ function bindEvents() {
   dom.importDraftsInput.addEventListener("change", importDrafts);
   dom.saveBackendButton.addEventListener("click", saveBackendSettings);
   dom.pullBackendButton.addEventListener("click", pullBackendSync);
-  dom.pushBackendButton.addEventListener("click", pushBackendSync);
+  dom.pushBackendButton.addEventListener("click", saveForProcessing);
 
   $$(".tab-button").forEach((button) => {
     button.addEventListener("click", () => switchSourceTab(button.dataset.sourceTab));
@@ -344,27 +408,34 @@ function bindEvents() {
   dom.buildPromptButton.addEventListener("click", () => {
     updatePrompt();
     clearPersistentError();
-    showToast("Prompt rebuilt.");
+    renderStatus();
+    saveStateSoon();
+    showToast("Default prompt added.");
   });
   dom.copyPromptButton.addEventListener("click", () => copyText(dom.promptOutput.value, "Prompt copied."));
+  dom.promptOutput.addEventListener("input", () => {
+    const draft = activeDraft();
+    draft.prompt = dom.promptOutput.value;
+    touchDraft(draft);
+    renderStatus();
+    saveStateSoon();
+  });
   dom.saveProxyButton.addEventListener("click", saveProxyEndpoint);
-  dom.runProxyButton.addEventListener("click", runProxySummary);
+  dom.runProxyButton.addEventListener("click", saveResultText);
   dom.clearErrorButton.addEventListener("click", clearPersistentError);
 
   dom.llmResultInput.addEventListener("input", () => {
     const draft = activeDraft();
     draft.result = dom.llmResultInput.value;
+    if (draft.status === "exported") draft.status = "done";
     touchDraft(draft);
-    updateHtml();
+    renderStatus();
     saveStateSoon();
   });
 
   dom.copyResultButton.addEventListener("click", () => copyText(dom.llmResultInput.value, "Result copied."));
-  dom.refreshHtmlButton.addEventListener("click", () => {
-    updateHtml();
-    showToast("HTML refreshed.");
-  });
-  dom.copyHtmlButton.addEventListener("click", () => copyText(dom.htmlOutput.value, "HTML copied."));
+  dom.refreshHtmlButton.addEventListener("click", () => createHtmlFromResult());
+  dom.copyHtmlButton.addEventListener("click", copyHtmlAndMarkExported);
   dom.downloadHtmlButton.addEventListener("click", downloadHtml);
   dom.toggleDirectionButton.addEventListener("click", togglePreviewDirection);
 }
@@ -561,7 +632,7 @@ async function downloadSourceFile(source) {
 
   if (source.remoteFilePath) {
     if (!backendEndpoint()) {
-      showToast("Save a backend endpoint to download the shared origin file.");
+      showToast("The shared storage address is missing.");
       return;
     }
     const item = await backendPost({
@@ -587,8 +658,10 @@ async function downloadSourceFile(source) {
 function render() {
   const draft = activeDraft();
   renderDraftSelect();
+  renderDraftBrowser();
   dom.draftTitleInput.value = draft.title;
   dom.draftSearchInput.value = state.draftSearch;
+  dom.draftStatusFilterInput.value = state.draftStatusFilter;
   dom.languageSelect.value = draft.language;
   dom.shapeSelect.value = draft.shape;
   dom.paragraphCountInput.value = draft.paragraphCount;
@@ -600,20 +673,26 @@ function render() {
   dom.llmResultInput.value = draft.result || "";
   dom.htmlOutput.value = draft.html || "";
   dom.preview.dir = draft.direction || "auto";
+  dom.preview.innerHTML = draft.html || "<p></p>";
+  renderStatus();
   renderSources();
-  updateHtml(false);
+}
+
+function renderStatus() {
+  const draft = activeDraft();
+  const status = normalizeStatus(draft.status);
+  const text = STATUS_TEXT[status] || STATUS_TEXT.draft;
+  dom.statusBadge.textContent = text.label;
+  dom.statusBadge.className = `status-badge status-${status}`;
+  dom.statusUpdated.textContent = draft.processingError && status === "error" ? draft.processingError : text.detail;
+  dom.modifiedTime.textContent = formatDateTime(draft.updatedAt);
+  dom.processedTime.textContent = draft.processedAt ? formatDateTime(draft.processedAt) : "Not yet";
+  dom.exportedTime.textContent = draft.exportedAt ? formatDateTime(draft.exportedAt) : "Not yet";
 }
 
 function renderDraftSelect() {
   const currentValue = dom.draftSelect.value;
-  const query = state.draftSearch;
-  const sortedDrafts = [...state.drafts].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
-  const visibleDrafts = query
-    ? sortedDrafts.filter((draft) => {
-      const haystack = `${draft.title} ${draft.result} ${draft.sources.map((source) => `${source.title} ${source.url}`).join(" ")}`.toLowerCase();
-      return haystack.includes(query);
-    })
-    : sortedDrafts;
+  const visibleDrafts = filteredDrafts();
   const draftsForOptions = visibleDrafts.some((draft) => draft.id === state.activeId)
     ? visibleDrafts
     : [activeDraft(), ...visibleDrafts.filter((draft) => draft.id !== state.activeId)];
@@ -622,11 +701,115 @@ function renderDraftSelect() {
     ...draftsForOptions.map((draft) => {
       const option = document.createElement("option");
       option.value = draft.id;
-      option.textContent = `${draft.title || "Untitled summary"} · ${draft.sources.length} sources`;
+      option.textContent = `${draft.title || "Untitled summary"} · ${statusLabel(draft.status)} · ${draft.sources.length} sources`;
       return option;
     })
   );
   dom.draftSelect.value = state.activeId || currentValue;
+}
+
+function renderDraftBrowser() {
+  const visibleDrafts = filteredDrafts();
+  if (!visibleDrafts.length) {
+    const empty = document.createElement("div");
+    empty.className = "draft-card empty";
+    empty.textContent = "No summaries match this view.";
+    dom.draftBrowser.replaceChildren(empty);
+    return;
+  }
+
+  dom.draftBrowser.replaceChildren(
+    ...visibleDrafts.map((draft) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = `draft-card ${draft.id === state.activeId ? "active" : ""}`;
+      button.addEventListener("click", () => {
+        state.activeId = draft.id;
+        render();
+        saveStateSoon();
+      });
+
+      const top = document.createElement("div");
+      top.className = "draft-card-top";
+      const title = document.createElement("strong");
+      title.textContent = draft.title || "Untitled summary";
+      const badge = document.createElement("span");
+      badge.className = `status-badge status-${normalizeStatus(draft.status)}`;
+      badge.textContent = statusLabel(draft.status);
+      top.append(title, badge);
+
+      const meta = document.createElement("p");
+      meta.textContent = [
+        `${draft.sources.length} source${draft.sources.length === 1 ? "" : "s"}`,
+        `modified ${formatDateTime(draft.updatedAt)}`,
+        draft.processedAt ? `processed ${formatDateTime(draft.processedAt)}` : "",
+        draft.exportedAt ? `exported ${formatDateTime(draft.exportedAt)}` : ""
+      ].filter(Boolean).join(" · ");
+
+      const sources = document.createElement("p");
+      sources.className = "draft-card-sources";
+      sources.textContent = draftSourcePreview(draft);
+
+      const snippet = document.createElement("p");
+      snippet.className = "draft-card-snippet";
+      snippet.textContent = draftSnippet(draft);
+
+      button.append(top, meta, sources, snippet);
+      return button;
+    })
+  );
+}
+
+function filteredDrafts() {
+  const query = state.draftSearch;
+  return [...state.drafts]
+    .sort((a, b) => String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")))
+    .filter((draft) => draftMatchesStatusFilter(draft, state.draftStatusFilter))
+    .filter((draft) => {
+      if (!query) return true;
+      return draftSearchHaystack(draft).includes(query);
+    });
+}
+
+function draftMatchesStatusFilter(draft, filter) {
+  const status = normalizeStatus(draft.status);
+  if (!filter || filter === "all") return true;
+  if (filter === "ready-export") {
+    return Boolean(String(draft.result || "").trim())
+      && status !== "pending"
+      && status !== "processing"
+      && status !== "exported";
+  }
+  return status === filter;
+}
+
+function draftSearchHaystack(draft) {
+  const sourceText = draft.sources.map((source) => [
+    source.title,
+    source.url,
+    source.filename,
+    source.text
+  ].filter(Boolean).join(" ")).join(" ");
+  return [
+    draft.title,
+    draft.prompt,
+    draft.result,
+    draft.html,
+    sourceText
+  ].filter(Boolean).join(" ").toLowerCase();
+}
+
+function draftSourcePreview(draft) {
+  if (!draft.sources.length) return "No sources yet";
+  const names = draft.sources.slice(0, 3).map((source) => source.title || source.filename || source.url || "Source");
+  const extra = draft.sources.length > names.length ? ` +${draft.sources.length - names.length} more` : "";
+  return `Sources: ${names.join(", ")}${extra}`;
+}
+
+function draftSnippet(draft) {
+  const text = normalizeWhitespace(draft.result || draft.sources.map((source) => source.text).filter(Boolean).join(" "));
+  if (!text) return "No text yet";
+  return text.length > 150 ? `${text.slice(0, 147)}...` : text;
 }
 
 function renderSources() {
@@ -699,13 +882,13 @@ function sourceMeta(source) {
   if (source.filename) pieces.push(formatBytes(source.size));
   if (source.textAvailable) pieces.push(`${formatCompactNumber((source.text || "").length)} chars`);
   if (source.fileStored) pieces.push("origin file stored");
-  if (source.remoteFilePath) pieces.push("origin file in GitHub");
-  if ((source.fileAvailable || state.volatileFiles.has(source.id)) && !source.fileStored) pieces.push("backend file ready");
+  if (source.remoteFilePath) pieces.push("origin file saved");
+  if ((source.fileAvailable || state.volatileFiles.has(source.id)) && !source.fileStored) pieces.push("file ready to save");
   if (!source.textAvailable && !source.fileAvailable && !state.volatileFiles.has(source.id)) {
     if (source.type === "link") {
       pieces.push("document URL only");
     } else if (source.type === "file") {
-      pieces.push("re-upload for backend");
+      pieces.push("re-upload to save");
     } else {
       pieces.push("no extracted text");
     }
@@ -723,9 +906,9 @@ function updatePrompt() {
 function buildPrompt(draft) {
   const language = draft.language === "same" ? "the same language as the strongest source material" : draft.language;
   const shapeMap = {
-    paragraphs: `${draft.paragraphCount} concise HTML paragraphs`,
-    "heading-paragraphs": "one short <h2> heading followed by concise HTML paragraphs",
-    "brief-list": "one short <h2> heading followed by a compact <ul> list"
+    paragraphs: `${draft.paragraphCount} concise paragraphs`,
+    "heading-paragraphs": "one short heading followed by concise paragraphs",
+    "brief-list": "one short heading followed by a compact bullet list"
   };
   const toneMap = {
     neutral: "neutral and factual",
@@ -738,13 +921,14 @@ function buildPrompt(draft) {
     `Write in ${language}.`,
     `Use a ${toneMap[draft.tone] || "neutral and factual"} tone.`,
     `Return ${shapeMap[draft.shape] || shapeMap.paragraphs}.`,
-    "Return only clean HTML. Allowed tags: <p>, <h2>, <h3>, <ul>, <ol>, <li>, <strong>, <em>, <a>, and <blockquote>.",
+    "Return only editable summary text. Do not return HTML.",
+    "Use blank lines between paragraphs. For a list, use simple bullet lines.",
     "Do not include Markdown fences, CSS, inline styles, tables, footnotes, or commentary.",
     "Preserve important names, dates, numbers, and causal claims. Do not invent facts.",
     "Most sources and summaries are in Hebrew. Keep Hebrew names, titles, dates, and institutional terms accurate.",
     "If a source is a public document URL, open/read the document before summarizing when your environment allows it.",
     "If a source is only a URL and you cannot access it, say that the URL needs source text rather than guessing.",
-    draft.includeLinks ? "Keep useful links as <a href=\"...\">...</a> when they directly support the summary." : "Do not include links unless the URL itself is central to the summary."
+    draft.includeLinks ? "Mention useful source links in plain text when they directly support the summary." : "Do not include links unless the URL itself is central to the summary."
   ];
 
   const sourceText = draft.sources.length ? draft.sources.map(formatSourceForPrompt).join("\n\n") : "No sources have been added yet.";
@@ -765,10 +949,97 @@ function formatSourceForPrompt(source, index) {
   return `${heading.join("\n")}\nTEXT: not available in this browser draft.`;
 }
 
+async function saveForProcessing() {
+  const draft = activeDraft();
+  if (!draft.sources.length) {
+    showToast("Add at least one source first.");
+    return;
+  }
+
+  draft.prompt = dom.promptOutput.value.trim() || buildPrompt(draft);
+  dom.promptOutput.value = draft.prompt;
+  draft.result = dom.llmResultInput.value;
+  draft.html = dom.htmlOutput.value;
+  draft.status = "pending";
+  draft.queuedAt = new Date().toISOString();
+  draft.processingStartedAt = "";
+  draft.processingRunId = "";
+  draft.processingError = "";
+  touchDraft(draft);
+  clearPersistentError();
+  renderStatus();
+  saveStateSoon();
+
+  await pushBackendSync({
+    busyMessage: "Saving item for processing...",
+    doneMessage: `"${draft.title}" is waiting for processing.`,
+    toastMessage: "Saved for processing."
+  });
+}
+
+async function saveResultText() {
+  const draft = activeDraft();
+  draft.result = dom.llmResultInput.value;
+  if (draft.status === "exported") draft.status = "done";
+  draft.processingError = "";
+  touchDraft(draft);
+  clearPersistentError();
+  renderStatus();
+  saveStateSoon();
+
+  await pushBackendSync({
+    busyMessage: "Saving text...",
+    doneMessage: "Text saved.",
+    toastMessage: "Text saved."
+  });
+}
+
+function createHtmlFromResult(showMessage = true) {
+  const draft = activeDraft();
+  draft.result = dom.llmResultInput.value;
+  const html = makeCmsHtml(draft.result || "");
+  if (!html) {
+    showToast("Add result text first.");
+    return false;
+  }
+
+  draft.html = html;
+  draft.htmlCreatedAt = new Date().toISOString();
+  if (draft.status === "exported") draft.status = "done";
+  dom.htmlOutput.value = html;
+  dom.preview.innerHTML = html;
+  touchDraft(draft);
+  renderStatus();
+  saveStateSoon();
+  if (showMessage) showToast("HTML created.");
+  return true;
+}
+
+async function copyHtmlAndMarkExported() {
+  if (!dom.htmlOutput.value && !createHtmlFromResult(false)) return;
+  const copied = await copyText(dom.htmlOutput.value, "HTML copied.");
+  if (!copied) return;
+
+  const draft = activeDraft();
+  draft.html = dom.htmlOutput.value;
+  draft.status = "exported";
+  draft.exportedAt = new Date().toISOString();
+  draft.processingError = "";
+  clearPersistentError();
+  renderStatus();
+  await saveState();
+
+  await pushBackendSync({
+    busyMessage: "Saving export status...",
+    doneMessage: "HTML copied and item marked exported.",
+    toastMessage: "HTML copied and saved."
+  });
+}
+
 async function runProxySummary() {
   const draft = activeDraft();
   if (!backendEndpoint()) {
-    showPersistentError("Save a backend endpoint first.");
+    showPersistentError("Shared storage is not configured.");
     return;
   }
   updatePrompt();
@@ -807,7 +1078,7 @@ async function runProxySummary() {
     showToast("LLM request failed. See Last error.");
   } finally {
     dom.runProxyButton.disabled = false;
-    dom.runProxyButton.querySelector("span:last-child").textContent = "Run LLM";
+    dom.runProxyButton.querySelector("span:last-child").textContent = "Save Text";
   }
 }
 
@@ -841,7 +1112,7 @@ function editorPassword() {
 
 async function backendPost(payload) {
   const endpoint = backendEndpoint();
-  if (!endpoint) throw new Error("Save a backend endpoint first.");
+  if (!endpoint) throw new Error("Shared storage is not configured.");
 
   const response = await fetch(endpoint, {
     method: "POST",
@@ -854,7 +1125,7 @@ async function backendPost(payload) {
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
     const details = data.details?.error?.message || data.details?.message || "";
-    const message = [data.error || `Backend returned ${response.status}`, details].filter(Boolean).join("\n\n");
+    const message = [data.error || `Shared storage returned ${response.status}`, details].filter(Boolean).join("\n\n");
     throw new Error(message);
   }
   return data;
@@ -866,24 +1137,24 @@ async function saveBackendSettings() {
     try {
       new URL(endpoint);
     } catch {
-      showToast("Backend endpoint URL is not valid.");
+      showToast("Shared storage address is not valid.");
       return;
     }
   }
   state.settings.proxyEndpoint = endpoint;
   dom.proxyEndpointInput.value = endpoint;
   await saveState();
-  setSyncStatus("Backend endpoint saved. Editor password is not stored.");
-  showToast("Backend endpoint saved.");
+  setSyncStatus("Shared storage saved. Editor password is not stored.");
+  showToast("Shared storage saved.");
 }
 
-async function pushBackendSync() {
+async function pushBackendSync(options = {}) {
   if (!backendEndpoint()) {
-    showToast("Save a backend endpoint first.");
+    showToast("Shared storage is not configured.");
     return;
   }
 
-  setSyncBusy(true, "Pushing shared data...");
+  setSyncBusy(true, options.busyMessage || "Saving shared work...");
   try {
     await saveState();
     let uploadedFiles = 0;
@@ -900,7 +1171,6 @@ async function pushBackendSync() {
         source.remoteFilePath = saved.remoteFilePath || source.remoteFilePath || "";
         uploadedFiles += 1;
       }
-      touchDraft(draft);
     }
 
     const payload = {
@@ -914,11 +1184,11 @@ async function pushBackendSync() {
       payload
     });
     await saveState();
-    setSyncStatus(`Pushed ${state.drafts.length} summaries and ${uploadedFiles} origin files.`);
-    showToast("Shared drafts pushed.");
+    setSyncStatus(options.doneMessage || `Saved ${state.drafts.length} items and ${uploadedFiles} origin files.`);
+    showToast(options.toastMessage || "Saved.");
   } catch (error) {
-    setSyncStatus(error.message || "Push failed.");
-    showToast(error.message || "Push failed.");
+    setSyncStatus(error.message || "Save failed.");
+    showToast(error.message || "Save failed.");
   } finally {
     setSyncBusy(false);
   }
@@ -926,15 +1196,15 @@ async function pushBackendSync() {
 
 async function pullBackendSync() {
   if (!backendEndpoint()) {
-    showToast("Save a backend endpoint first.");
+    showToast("Shared storage is not configured.");
     return;
   }
 
-  if (state.drafts.length && !window.confirm("Replace local draft list with the shared backend version? Unsynced local edits may be lost.")) {
+  if (state.drafts.length && !window.confirm("Refresh from the shared work list? Unsaved local edits may be lost.")) {
     return;
   }
 
-  setSyncBusy(true, "Pulling shared data...");
+  setSyncBusy(true, "Refreshing shared work...");
   try {
     const payload = await backendPost({ action: "loadSharedState" });
     if (!payload || !Array.isArray(payload.drafts)) throw new Error("Shared drafts file is invalid.");
@@ -947,11 +1217,11 @@ async function pullBackendSync() {
     await idbClear("files");
     await saveState();
     render();
-    setSyncStatus(`Pulled ${state.drafts.length} shared summaries.`);
-    showToast("Shared drafts pulled.");
+    setSyncStatus(`Loaded ${state.drafts.length} shared items.`);
+    showToast("Shared work refreshed.");
   } catch (error) {
-    setSyncStatus(error.message || "Pull failed.");
-    showToast(error.message || "Pull failed.");
+    setSyncStatus(error.message || "Refresh failed.");
+    showToast(error.message || "Refresh failed.");
   } finally {
     setSyncBusy(false);
   }
@@ -1239,7 +1509,7 @@ function downloadBlob(content, filename, type) {
 async function copyText(text, successMessage) {
   if (!text) {
     showToast("Nothing to copy.");
-    return;
+    return false;
   }
   try {
     await navigator.clipboard.writeText(text);
@@ -1255,6 +1525,7 @@ async function copyText(text, successMessage) {
     area.remove();
   }
   showToast(successMessage);
+  return true;
 }
 
 function showToast(message) {
@@ -1357,7 +1628,7 @@ function deriveLinkTitle(parsedUrl) {
 
 function clipText(text, maxLength) {
   if (text.length <= maxLength) return text;
-  return `${text.slice(0, maxLength)}\n\n[Text clipped at ${formatCompactNumber(maxLength)} characters in this prompt. Add a backend endpoint or split the draft for full-source processing.]`;
+  return `${text.slice(0, maxLength)}\n\n[Text clipped at ${formatCompactNumber(maxLength)} characters in this prompt. Split the source into another item if the text is too long.]`;
 }
 
 function escapeHtml(value) {
@@ -1381,6 +1652,20 @@ function formatBytes(bytes) {
 
 function formatCompactNumber(value) {
   return new Intl.NumberFormat(undefined, { notation: "compact", maximumFractionDigits: 1 }).format(value);
+}
+
+function formatDateTime(value) {
+  if (!value) return "Never";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "Never";
+  return new Intl.DateTimeFormat(undefined, {
+    dateStyle: "short",
+    timeStyle: "short"
+  }).format(date);
+}
+
+function statusLabel(status) {
+  return (STATUS_TEXT[normalizeStatus(status)] || STATUS_TEXT.draft).label;
 }
 
 function clamp(value, min, max) {

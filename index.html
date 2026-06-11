@@ -61,6 +61,21 @@
           <input id="draftSearchInput" type="search" autocomplete="off" spellcheck="true">
         </label>
 
+        <label class="field">
+          <span>Show summaries</span>
+          <select id="draftStatusFilterInput">
+            <option value="all">All summaries</option>
+            <option value="ready-export">Ready to export</option>
+            <option value="pending">Waiting</option>
+            <option value="processing">Processing</option>
+            <option value="draft">Drafts</option>
+            <option value="error">Needs attention</option>
+            <option value="exported">Exported</option>
+          </select>
+        </label>
+
+        <div class="draft-browser" id="draftBrowser" aria-live="polite"></div>
+
         <div class="stats-row" aria-label="Draft statistics">
           <div>
             <strong id="sourceCount">0</strong>
@@ -70,6 +85,27 @@
             <strong id="sourceChars">0</strong>
             <span>chars</span>
           </div>
+        </div>
+
+        <div class="status-panel" aria-label="Item status">
+          <div class="status-main">
+            <span class="status-badge" id="statusBadge">Draft</span>
+            <span id="statusUpdated">Not sent for processing yet</span>
+          </div>
+          <dl class="status-times" aria-label="Item dates">
+            <div>
+              <dt>Modified</dt>
+              <dd id="modifiedTime">Never</dd>
+            </div>
+            <div>
+              <dt>Processed</dt>
+              <dd id="processedTime">Not yet</dd>
+            </div>
+            <div>
+              <dt>Exported</dt>
+              <dd id="exportedTime">Not yet</dd>
+            </div>
+          </dl>
         </div>
 
         <div class="section-tabs" role="tablist" aria-label="Source type">
@@ -114,13 +150,13 @@
             <span>Upload PDF / Word / text</span>
           </label>
           <input id="fileSourceInput" class="visually-hidden" type="file" multiple accept=".pdf,.doc,.docx,.txt,.md,.markdown,.html,.htm,.csv,.json,.rtf,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/*">
-          <p class="panel-note">Text files are extracted in the browser. PDF and Word files are sent through the shared backend.</p>
+          <p class="panel-note">Text files are read in the browser. PDF and Word files are kept with the saved item.</p>
         </div>
 
         <div class="source-list" id="sourceList" aria-live="polite"></div>
 
         <details class="sync-box" open>
-          <summary>Shared Backend Sync</summary>
+          <summary>Shared Work</summary>
           <label class="field">
             <span>Editor password</span>
             <input id="editorPasswordInput" type="password" autocomplete="current-password" spellcheck="false">
@@ -128,26 +164,26 @@
           <div class="button-row">
             <button class="button secondary" id="pullBackendButton" type="button">
               <span aria-hidden="true">⇣</span>
-              <span>Pull</span>
+              <span>Refresh</span>
             </button>
             <button class="button primary" id="pushBackendButton" type="button">
-              <span aria-hidden="true">⇡</span>
-              <span>Push</span>
+              <span aria-hidden="true">✓</span>
+              <span>Save for Processing</span>
             </button>
           </div>
           <div class="visually-hidden" aria-hidden="true">
             <input id="backendEndpointInput" type="url" inputmode="url" autocomplete="off" spellcheck="false">
             <button id="saveBackendButton" type="button">Save Endpoint</button>
           </div>
-          <p class="panel-note" id="syncStatus">Enter the editor password, then pull or push shared summaries.</p>
+          <p class="panel-note" id="syncStatus">Enter the editor password. Save sends this item for processing; Refresh loads the latest shared work.</p>
         </details>
       </section>
 
       <section class="panel panel-brief" aria-labelledby="briefTitle">
         <div class="panel-heading">
           <div>
-            <h2 id="briefTitle">LLM Brief</h2>
-            <p>Prompt, backend, and model result</p>
+            <h2 id="briefTitle">Summary Text</h2>
+            <p>Prompt, result, and edits</p>
           </div>
         </div>
 
@@ -190,7 +226,7 @@
         <div class="button-row">
           <button class="button primary" id="buildPromptButton" type="button">
             <span aria-hidden="true">↻</span>
-            <span>Build Prompt</span>
+            <span>Default Prompt</span>
           </button>
           <button class="button secondary" id="copyPromptButton" type="button">
             <span aria-hidden="true">⧉</span>
@@ -199,7 +235,7 @@
         </div>
 
         <label class="field grow">
-          <span>Prompt</span>
+          <span>Prompt for Codex</span>
           <textarea id="promptOutput" rows="11" spellcheck="false"></textarea>
         </label>
 
@@ -210,8 +246,8 @@
 
         <div class="button-row">
           <button class="button primary" id="runProxyButton" type="button">
-            <span aria-hidden="true">▶</span>
-            <span>Run LLM</span>
+            <span aria-hidden="true">✓</span>
+            <span>Save Text</span>
           </button>
           <button class="button secondary" id="copyResultButton" type="button">
             <span aria-hidden="true">⧉</span>
@@ -239,9 +275,9 @@
             <h2 id="outputTitle">HTML</h2>
             <p>CMS-ready output and preview</p>
           </div>
-          <button class="button secondary" id="refreshHtmlButton" type="button" title="Refresh HTML">
+          <button class="button secondary" id="refreshHtmlButton" type="button" title="Create HTML">
             <span aria-hidden="true">↻</span>
-            <span>Refresh</span>
+            <span>Create HTML</span>
           </button>
         </div>
 
