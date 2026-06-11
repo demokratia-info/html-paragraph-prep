@@ -10,6 +10,13 @@ const PASSWORD_STORAGE_KEY = "summary-html-desk.editor-password.local";
 const MAX_PROMPT_SOURCE_CHARS = 80000;
 const MAX_BINARY_FILE_BYTES = 18 * 1024 * 1024;
 const SHARED_REFRESH_INTERVAL_MS = 60 * 1000;
+const DEFAULT_SUMMARY_OPTIONS = {
+  language: "Hebrew",
+  shape: "paragraphs",
+  paragraphCount: 3,
+  tone: "neutral",
+  includeLinks: true
+};
 const VALID_STATUSES = new Set(["draft", "pending", "processing", "done", "error", "exported"]);
 const STATUS_TEXT = {
   draft: {
@@ -90,8 +97,6 @@ const dom = {
   modifiedTime: $("#modifiedTime"),
   processedTime: $("#processedTime"),
   exportedTime: $("#exportedTime"),
-  sourceCount: $("#sourceCount"),
-  sourceChars: $("#sourceChars"),
   textSourceTitleInput: $("#textSourceTitleInput"),
   textSourceInput: $("#textSourceInput"),
   addTextSourceButton: $("#addTextSourceButton"),
@@ -99,13 +104,7 @@ const dom = {
   linkNotesInput: $("#linkNotesInput"),
   fileSourceInput: $("#fileSourceInput"),
   sourceList: $("#sourceList"),
-  languageSelect: $("#languageSelect"),
-  shapeSelect: $("#shapeSelect"),
-  paragraphCountInput: $("#paragraphCountInput"),
-  toneSelect: $("#toneSelect"),
-  includeLinksCheckbox: $("#includeLinksCheckbox"),
   buildPromptButton: $("#buildPromptButton"),
-  copyPromptButton: $("#copyPromptButton"),
   promptOutput: $("#promptOutput"),
   errorBox: $("#errorBox"),
   errorText: $("#errorText"),
@@ -137,11 +136,7 @@ function createDraft(title = "Untitled summary") {
     id: createId(),
     title,
     sources: [],
-    language: "Hebrew",
-    shape: "paragraphs",
-    paragraphCount: 3,
-    tone: "neutral",
-    includeLinks: true,
+    ...DEFAULT_SUMMARY_OPTIONS,
     prompt: "",
     result: "",
     html: "",
@@ -202,6 +197,7 @@ function normalizeDraft(draft) {
   normalized.htmlCreatedAt = normalized.htmlCreatedAt || "";
   normalized.processingError = normalized.processingError || "";
   normalized.processingRunId = normalized.processingRunId || "";
+  Object.assign(normalized, DEFAULT_SUMMARY_OPTIONS);
   return normalized;
 }
 
@@ -419,14 +415,6 @@ function bindEvents() {
     if (files.length) await addFiles(files);
   });
 
-  [
-    dom.languageSelect,
-    dom.shapeSelect,
-    dom.paragraphCountInput,
-    dom.toneSelect,
-    dom.includeLinksCheckbox
-  ].forEach((control) => control.addEventListener("change", updateDraftOptions));
-
   dom.buildPromptButton.addEventListener("click", () => {
     updatePrompt();
     clearPersistentError();
@@ -434,7 +422,6 @@ function bindEvents() {
     saveStateSoon();
     showToast("Default prompt added.");
   });
-  dom.copyPromptButton.addEventListener("click", () => copyText(dom.promptOutput.value, "Prompt copied."));
   dom.promptOutput.addEventListener("input", () => {
     const draft = activeDraft();
     draft.prompt = dom.promptOutput.value;
@@ -593,18 +580,6 @@ function switchSourceTab(tab) {
     panel.hidden = !active;
     panel.classList.toggle("active", active);
   });
-}
-
-function updateDraftOptions() {
-  const draft = activeDraft();
-  draft.language = dom.languageSelect.value;
-  draft.shape = dom.shapeSelect.value;
-  draft.paragraphCount = clamp(Number(dom.paragraphCountInput.value || 3), 1, 8);
-  draft.tone = dom.toneSelect.value;
-  draft.includeLinks = dom.includeLinksCheckbox.checked;
-  touchDraft(draft);
-  updatePrompt();
-  saveStateSoon();
 }
 
 function touchDraft(draft) {
@@ -813,11 +788,6 @@ function render() {
   dom.draftTitleInput.value = draft.title;
   dom.draftSearchInput.value = state.draftSearch;
   dom.draftStatusFilterInput.value = state.draftStatusFilter;
-  dom.languageSelect.value = draft.language;
-  dom.shapeSelect.value = draft.shape;
-  dom.paragraphCountInput.value = draft.paragraphCount;
-  dom.toneSelect.value = draft.tone;
-  dom.includeLinksCheckbox.checked = draft.includeLinks;
   dom.promptOutput.value = draft.prompt || buildPrompt(draft);
   dom.proxyEndpointInput.value = DEFAULT_BACKEND_ENDPOINT;
   dom.backendEndpointInput.value = DEFAULT_BACKEND_ENDPOINT;
@@ -973,9 +943,6 @@ function draftSnippet(draft) {
 
 function renderSources() {
   const draft = activeDraft();
-  const sourceChars = draft.sources.reduce((total, source) => total + (source.text || "").length, 0);
-  dom.sourceCount.textContent = String(draft.sources.length);
-  dom.sourceChars.textContent = formatCompactNumber(sourceChars);
 
   if (!draft.sources.length) {
     const empty = document.createElement("div");
@@ -1100,9 +1067,10 @@ function updatePrompt() {
 }
 
 function buildPrompt(draft) {
-  const language = draft.language === "same" ? "the same language as the strongest source material" : draft.language;
+  const options = DEFAULT_SUMMARY_OPTIONS;
+  const language = options.language === "same" ? "the same language as the strongest source material" : options.language;
   const shapeMap = {
-    paragraphs: `${draft.paragraphCount} concise paragraphs`,
+    paragraphs: `${options.paragraphCount} concise paragraphs`,
     "heading-paragraphs": "one short heading followed by concise paragraphs",
     "brief-list": "one short heading followed by a compact bullet list"
   };
@@ -1115,8 +1083,8 @@ function buildPrompt(draft) {
   const instructions = [
     "You are preparing copy for a content management system.",
     `Write in ${language}.`,
-    `Use a ${toneMap[draft.tone] || "neutral and factual"} tone.`,
-    `Return ${shapeMap[draft.shape] || shapeMap.paragraphs}.`,
+    `Use a ${toneMap[options.tone] || "neutral and factual"} tone.`,
+    `Return ${shapeMap[options.shape] || shapeMap.paragraphs}.`,
     "Return only editable summary text. Do not return HTML.",
     "Use blank lines between paragraphs. For a list, use simple bullet lines.",
     "Do not include Markdown fences, CSS, inline styles, tables, footnotes, or commentary.",
@@ -1124,7 +1092,7 @@ function buildPrompt(draft) {
     "Most sources and summaries are in Hebrew. Keep Hebrew names, titles, dates, and institutional terms accurate.",
     "If a source is a public document URL, open/read the document before summarizing when your environment allows it.",
     "If a source is only a URL and you cannot access it, say that the URL needs source text rather than guessing.",
-    draft.includeLinks ? "Mention useful source links in plain text when they directly support the summary." : "Do not include links unless the URL itself is central to the summary."
+    options.includeLinks ? "Mention useful source links in plain text when they directly support the summary." : "Do not include links unless the URL itself is central to the summary."
   ];
 
   const sourceText = draft.sources.length ? draft.sources.map(formatSourceForPrompt).join("\n\n") : "No sources have been added yet.";
@@ -1154,7 +1122,8 @@ async function saveForProcessing() {
     return;
   }
 
-  draft.prompt = dom.promptOutput.value.trim() || buildPrompt(draft);
+  const editedPrompt = dom.promptOutput.value.trim();
+  draft.prompt = String(draft.prompt || "").trim() ? editedPrompt || buildPrompt(draft) : buildPrompt(draft);
   dom.promptOutput.value = draft.prompt;
   draft.result = dom.llmResultInput.value;
   draft.html = dom.htmlOutput.value;
@@ -1252,13 +1221,7 @@ async function runProxySummary() {
     const payload = await backendPost({
       action: "summarize",
       title: draft.title,
-      options: {
-        language: draft.language,
-        shape: draft.shape,
-        paragraphCount: draft.paragraphCount,
-        tone: draft.tone,
-        includeLinks: draft.includeLinks
-      },
+      options: DEFAULT_SUMMARY_OPTIONS,
       prompt: draft.prompt,
       sources: await Promise.all(draft.sources.map(sourceForProxy))
     });

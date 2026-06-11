@@ -99,12 +99,8 @@
         <div class="draft-browser" id="draftBrowser" aria-live="polite"></div>
       </section>
 
-      <section class="panel panel-source" aria-labelledby="sourceTitle">
-        <div class="panel-heading">
-          <div>
-            <h2 id="sourceTitle">Source Details</h2>
-            <p id="syncStatus">Shared work loaded.</p>
-          </div>
+      <section class="panel panel-source" aria-label="Source and prompt">
+        <div class="source-toolbar">
           <button class="icon-button danger" id="deleteDraftButton" type="button" title="Delete source" aria-label="Delete source">×</button>
         </div>
 
@@ -152,16 +148,17 @@
 
         <div class="source-list" id="sourceList" aria-live="polite"></div>
 
-        <div class="stats-row" aria-label="Source statistics">
-          <div>
-            <strong id="sourceCount">0</strong>
-            <span>items</span>
-          </div>
-          <div>
-            <strong id="sourceChars">0</strong>
-            <span>chars</span>
-          </div>
+        <div class="button-row prompt-actions">
+          <button class="button primary" id="buildPromptButton" type="button">
+            <span aria-hidden="true">↻</span>
+            <span>Default Prompt</span>
+          </button>
         </div>
+
+        <label class="field prompt-field">
+          <span>Prompt for Codex</span>
+          <textarea id="promptOutput" rows="7" spellcheck="false"></textarea>
+        </label>
 
         <button class="button primary full" id="pushBackendButton" type="button">
           <span aria-hidden="true">✓</span>
@@ -172,6 +169,7 @@
           <input id="editorPasswordInput" type="password" autocomplete="current-password" spellcheck="false">
           <input id="backendEndpointInput" type="url" inputmode="url" autocomplete="off" spellcheck="false">
           <button id="saveBackendButton" type="button">Save Endpoint</button>
+          <p id="syncStatus">Shared work loaded.</p>
           <input id="textSourceTitleInput" type="text">
           <textarea id="textSourceInput"></textarea>
           <button id="addTextSourceButton" type="button">Add Text</button>
@@ -183,64 +181,9 @@
         <div class="panel-heading">
           <div>
             <h2 id="briefTitle">Summary Text</h2>
-            <p>Prompt, result, and edits</p>
+            <p>Result and edits</p>
           </div>
         </div>
-
-        <details class="advanced-box">
-          <summary>Default prompt settings</summary>
-          <div class="control-grid">
-          <label class="field">
-            <span>Language</span>
-            <select id="languageSelect">
-              <option value="Hebrew">Hebrew</option>
-              <option value="same">Same as source</option>
-              <option value="English">English</option>
-            </select>
-          </label>
-          <label class="field">
-            <span>Shape</span>
-            <select id="shapeSelect">
-              <option value="paragraphs">Paragraphs</option>
-              <option value="heading-paragraphs">Heading + paragraphs</option>
-              <option value="brief-list">Brief list</option>
-            </select>
-          </label>
-          <label class="field">
-            <span>Paragraphs</span>
-            <input id="paragraphCountInput" type="number" min="1" max="8" step="1">
-          </label>
-          <label class="field">
-            <span>Tone</span>
-            <select id="toneSelect">
-              <option value="neutral">Neutral</option>
-              <option value="academic">Academic</option>
-              <option value="plain">Plain</option>
-            </select>
-          </label>
-          </div>
-
-          <label class="check-row">
-            <input id="includeLinksCheckbox" type="checkbox">
-            <span>Keep useful source links in the HTML</span>
-          </label>
-        </details>
-
-        <div class="button-row">
-          <button class="button primary" id="buildPromptButton" type="button">
-            <span aria-hidden="true">↻</span>
-            <span>Default Prompt</span>
-          </button>
-          <button class="button secondary" id="copyPromptButton" type="button">
-            <span aria-hidden="true">⧉</span>
-            <span>Copy Prompt</span>
-          </button>
-        </div>
-
-        <label class="field grow">
-          <span>Prompt for Codex</span>
-          <textarea id="promptOutput" rows="11" spellcheck="false"></textarea>
-        </label>
 
         <div class="visually-hidden" aria-hidden="true">
           <input id="proxyEndpointInput" type="url" inputmode="url" autocomplete="off">

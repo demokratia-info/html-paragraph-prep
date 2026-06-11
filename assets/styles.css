@@ -184,6 +184,11 @@ summary {
   letter-spacing: 0;
 }
 
+.source-toolbar {
+  display: flex;
+  justify-content: flex-end;
+}
+
 .field {
   display: flex;
   flex-direction: column;
@@ -507,49 +512,22 @@ textarea:focus {
   min-height: 18px;
 }
 
-.proxy-box,
-.advanced-box {
+.proxy-box {
   border: 1px solid var(--line);
   border-radius: var(--radius);
   padding: 10px 12px;
   background: #fbfcfd;
 }
 
-.proxy-box summary,
-.advanced-box summary {
+.proxy-box summary {
   cursor: pointer;
   font-weight: 800;
 }
 
-.proxy-box[open],
-.advanced-box[open] {
+.proxy-box[open] {
   display: flex;
   flex-direction: column;
   gap: 12px;
-}
-
-.stats-row {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 8px;
-}
-
-.stats-row div {
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  padding: 10px;
-  background: #fbfcfd;
-}
-
-.stats-row strong {
-  display: block;
-  font-size: 22px;
-  line-height: 1.1;
-}
-
-.stats-row span {
-  color: var(--muted);
-  font-size: 12px;
 }
 
 .status-panel {
