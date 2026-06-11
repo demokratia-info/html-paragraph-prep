@@ -20,7 +20,7 @@ This project is intentionally independent of `Documents/DemocracyWebSite`.
 
 1. Open the app.
 2. Add Hebrew document links, paste source text, or upload PDF/Word/text files.
-3. Paste the shared backend endpoint and editor password.
+3. Enter the editor password.
 4. Click **Run LLM** to generate the Hebrew summary, or use **Build Prompt** as a manual fallback.
 5. Edit the result if needed.
 6. Click **Push** so other editors can pull the updated summaries.
@@ -69,7 +69,7 @@ wrangler secret put OPENAI_API_KEY
 wrangler deploy
 ```
 
-Paste the deployed Worker URL into **Backend endpoint** inside the app.
+The app is preconfigured for `https://summary-html-desk-openai.demokratia-info.workers.dev`. If the deployed Worker URL is different, update `DEFAULT_BACKEND_ENDPOINT` in `assets/app.js` or paste the URL in **Advanced backend endpoint** inside the app.
 
 The Worker uses the OpenAI Responses API, supports text inputs, public document file URLs, private uploaded PDF/Word files stored in the data repo, and optional web search for ordinary URLs.
 

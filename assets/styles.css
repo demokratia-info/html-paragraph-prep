@@ -375,19 +375,22 @@ textarea:focus {
   min-height: 18px;
 }
 
-.proxy-box {
+.proxy-box,
+.advanced-box {
   border: 1px solid var(--line);
   border-radius: var(--radius);
   padding: 10px 12px;
   background: #fbfcfd;
 }
 
-.proxy-box summary {
+.proxy-box summary,
+.advanced-box summary {
   cursor: pointer;
   font-weight: 800;
 }
 
-.proxy-box[open] {
+.proxy-box[open],
+.advanced-box[open] {
   display: flex;
   flex-direction: column;
   gap: 12px;

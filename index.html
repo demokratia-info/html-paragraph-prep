@@ -122,18 +122,10 @@
         <details class="sync-box">
           <summary>Shared Backend Sync</summary>
           <label class="field">
-            <span>Backend endpoint</span>
-            <input id="backendEndpointInput" type="url" inputmode="url" autocomplete="off" spellcheck="false">
-          </label>
-          <label class="field">
             <span>Editor password</span>
             <input id="editorPasswordInput" type="password" autocomplete="current-password" spellcheck="false">
           </label>
           <div class="button-row">
-            <button class="button secondary" id="saveBackendButton" type="button">
-              <span aria-hidden="true">✓</span>
-              <span>Save Endpoint</span>
-            </button>
             <button class="button secondary" id="pullBackendButton" type="button">
               <span aria-hidden="true">⇣</span>
               <span>Pull</span>
@@ -143,7 +135,18 @@
               <span>Push</span>
             </button>
           </div>
-          <p class="panel-note" id="syncStatus">Local browser database only until synced.</p>
+          <details class="advanced-box">
+            <summary>Advanced endpoint</summary>
+            <label class="field">
+              <span>Backend endpoint</span>
+              <input id="backendEndpointInput" type="url" inputmode="url" autocomplete="off" spellcheck="false">
+            </label>
+            <button class="button secondary" id="saveBackendButton" type="button">
+              <span aria-hidden="true">✓</span>
+              <span>Save Endpoint</span>
+            </button>
+          </details>
+          <p class="panel-note" id="syncStatus">Enter the editor password, then pull or push shared summaries.</p>
         </details>
       </section>
 
@@ -208,7 +211,7 @@
         </label>
 
         <details class="proxy-box">
-          <summary>Backend endpoint</summary>
+          <summary>Advanced backend endpoint</summary>
           <label class="field">
             <span>Endpoint URL</span>
             <input id="proxyEndpointInput" type="url" inputmode="url" autocomplete="off">

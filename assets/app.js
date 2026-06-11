@@ -4,6 +4,7 @@ const STORAGE_KEY = "summary-html-desk.drafts.v1";
 const SETTINGS_KEY = "summary-html-desk.settings.v1";
 const DB_NAME = "summary-html-desk";
 const DB_VERSION = 1;
+const DEFAULT_BACKEND_ENDPOINT = "https://summary-html-desk-openai.demokratia-info.workers.dev";
 const MAX_PROMPT_SOURCE_CHARS = 80000;
 const MAX_BINARY_FILE_BYTES = 18 * 1024 * 1024;
 
@@ -12,7 +13,7 @@ const state = {
   activeId: null,
   db: null,
   settings: {
-    proxyEndpoint: ""
+    proxyEndpoint: DEFAULT_BACKEND_ENDPOINT
   },
   draftSearch: "",
   activeSourceTab: "text",
@@ -589,8 +590,8 @@ function render() {
   dom.toneSelect.value = draft.tone;
   dom.includeLinksCheckbox.checked = draft.includeLinks;
   dom.promptOutput.value = draft.prompt || buildPrompt(draft);
-  dom.proxyEndpointInput.value = state.settings.proxyEndpoint || "";
-  dom.backendEndpointInput.value = state.settings.proxyEndpoint || "";
+  dom.proxyEndpointInput.value = state.settings.proxyEndpoint || DEFAULT_BACKEND_ENDPOINT;
+  dom.backendEndpointInput.value = state.settings.proxyEndpoint || DEFAULT_BACKEND_ENDPOINT;
   dom.llmResultInput.value = draft.result || "";
   dom.htmlOutput.value = draft.html || "";
   dom.preview.dir = draft.direction || "auto";
@@ -821,7 +822,7 @@ async function sourceForProxy(source) {
 }
 
 function backendEndpoint() {
-  return (dom.backendEndpointInput.value.trim() || state.settings.proxyEndpoint || "").trim();
+  return (dom.backendEndpointInput.value.trim() || state.settings.proxyEndpoint || DEFAULT_BACKEND_ENDPOINT).trim();
 }
 
 function editorPassword() {
@@ -848,7 +849,7 @@ async function backendPost(payload) {
 }
 
 async function saveBackendSettings() {
-  const endpoint = dom.backendEndpointInput.value.trim();
+  const endpoint = dom.backendEndpointInput.value.trim() || DEFAULT_BACKEND_ENDPOINT;
   if (endpoint) {
     try {
       new URL(endpoint);
@@ -861,7 +862,7 @@ async function saveBackendSettings() {
   dom.proxyEndpointInput.value = endpoint;
   await saveState();
   setSyncStatus("Backend endpoint saved. Editor password is not stored.");
-  showToast(endpoint ? "Backend endpoint saved." : "Backend endpoint cleared.");
+  showToast("Backend endpoint saved.");
 }
 
 async function pushBackendSync() {
@@ -1110,7 +1111,7 @@ function sanitizeHref(href) {
 }
 
 async function saveProxyEndpoint() {
-  const value = dom.proxyEndpointInput.value.trim();
+  const value = dom.proxyEndpointInput.value.trim() || DEFAULT_BACKEND_ENDPOINT;
   if (value) {
     try {
       new URL(value);
@@ -1122,7 +1123,7 @@ async function saveProxyEndpoint() {
   state.settings.proxyEndpoint = value;
   dom.backendEndpointInput.value = value;
   await saveState();
-  showToast(value ? "Endpoint saved." : "Endpoint cleared.");
+  showToast("Endpoint saved.");
 }
 
 function togglePreviewDirection() {
