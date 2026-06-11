@@ -219,6 +219,14 @@
           </button>
         </div>
 
+        <div class="error-box" id="errorBox" role="alert" hidden>
+          <div class="error-heading">
+            <span>Last error</span>
+            <button class="icon-button" id="clearErrorButton" type="button" title="Clear error" aria-label="Clear error">×</button>
+          </div>
+          <pre id="errorText"></pre>
+        </div>
+
         <label class="field grow">
           <span>Result</span>
           <textarea id="llmResultInput" rows="11" spellcheck="true"></textarea>

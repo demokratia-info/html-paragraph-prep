@@ -434,6 +434,35 @@ textarea:focus {
   overflow: hidden;
 }
 
+.error-box {
+  border: 1px solid #f3b7ad;
+  border-radius: var(--radius);
+  background: #fff4f2;
+  color: #7a271a;
+  overflow: hidden;
+}
+
+.error-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 10px;
+  border-bottom: 1px solid #f3b7ad;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.error-box pre {
+  margin: 0;
+  padding: 10px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-family: var(--mono);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
 .preview-toolbar {
   display: flex;
   align-items: center;

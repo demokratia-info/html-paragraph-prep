@@ -58,6 +58,9 @@ const dom = {
   buildPromptButton: $("#buildPromptButton"),
   copyPromptButton: $("#copyPromptButton"),
   promptOutput: $("#promptOutput"),
+  errorBox: $("#errorBox"),
+  errorText: $("#errorText"),
+  clearErrorButton: $("#clearErrorButton"),
   proxyEndpointInput: $("#proxyEndpointInput"),
   saveProxyButton: $("#saveProxyButton"),
   runProxyButton: $("#runProxyButton"),
@@ -340,11 +343,13 @@ function bindEvents() {
 
   dom.buildPromptButton.addEventListener("click", () => {
     updatePrompt();
+    clearPersistentError();
     showToast("Prompt rebuilt.");
   });
   dom.copyPromptButton.addEventListener("click", () => copyText(dom.promptOutput.value, "Prompt copied."));
   dom.saveProxyButton.addEventListener("click", saveProxyEndpoint);
   dom.runProxyButton.addEventListener("click", runProxySummary);
+  dom.clearErrorButton.addEventListener("click", clearPersistentError);
 
   dom.llmResultInput.addEventListener("input", () => {
     const draft = activeDraft();
@@ -763,10 +768,11 @@ function formatSourceForPrompt(source, index) {
 async function runProxySummary() {
   const draft = activeDraft();
   if (!backendEndpoint()) {
-    showToast("Save a backend endpoint first.");
+    showPersistentError("Save a backend endpoint first.");
     return;
   }
   updatePrompt();
+  clearPersistentError();
   dom.runProxyButton.disabled = true;
   dom.runProxyButton.querySelector("span:last-child").textContent = "Running";
 
@@ -792,9 +798,13 @@ async function runProxySummary() {
     touchDraft(draft);
     updateHtml();
     saveStateSoon();
+    setSyncStatus("LLM result added.");
     showToast("LLM result added.");
   } catch (error) {
-    showToast(error.message || "Proxy request failed.");
+    const message = error.message || "LLM request failed.";
+    showPersistentError(message);
+    setSyncStatus(message);
+    showToast("LLM request failed. See Last error.");
   } finally {
     dom.runProxyButton.disabled = false;
     dom.runProxyButton.querySelector("span:last-child").textContent = "Run LLM";
@@ -843,7 +853,9 @@ async function backendPost(payload) {
   });
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
-    throw new Error(data.error || `Backend returned ${response.status}`);
+    const details = data.details?.error?.message || data.details?.message || "";
+    const message = [data.error || `Backend returned ${response.status}`, details].filter(Boolean).join("\n\n");
+    throw new Error(message);
   }
   return data;
 }
@@ -977,6 +989,16 @@ function setSyncBusy(isBusy, message = "") {
 
 function setSyncStatus(message) {
   dom.syncStatus.textContent = message;
+}
+
+function showPersistentError(message) {
+  dom.errorText.textContent = String(message || "Unknown error.");
+  dom.errorBox.hidden = false;
+}
+
+function clearPersistentError() {
+  dom.errorText.textContent = "";
+  dom.errorBox.hidden = true;
 }
 
 function updateHtml(shouldSave = true) {
