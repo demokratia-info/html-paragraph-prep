@@ -226,6 +226,12 @@ textarea {
   padding: 10px 11px;
 }
 
+textarea#llmResultInput {
+  direction: rtl;
+  text-align: right;
+  line-height: 1.7;
+}
+
 textarea#promptOutput,
 textarea#htmlOutput {
   font-family: var(--mono);

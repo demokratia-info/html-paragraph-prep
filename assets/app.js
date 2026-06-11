@@ -829,6 +829,7 @@ function render() {
   dom.linkTitleInput.value = primaryLink?.title || "";
   dom.linkUrlInput.value = primaryLink?.url || "";
   dom.llmResultInput.value = draft.result || "";
+  dom.llmResultInput.dir = "rtl";
   dom.htmlOutput.value = draft.html || "";
   dom.preview.dir = draft.direction || "auto";
   dom.preview.innerHTML = draft.html || "<p></p>";
