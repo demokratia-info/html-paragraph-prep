@@ -95,10 +95,8 @@ const dom = {
   textSourceTitleInput: $("#textSourceTitleInput"),
   textSourceInput: $("#textSourceInput"),
   addTextSourceButton: $("#addTextSourceButton"),
-  linkTitleInput: $("#linkTitleInput"),
   linkUrlInput: $("#linkUrlInput"),
   linkNotesInput: $("#linkNotesInput"),
-  addLinkSourceButton: $("#addLinkSourceButton"),
   fileSourceInput: $("#fileSourceInput"),
   sourceList: $("#sourceList"),
   languageSelect: $("#languageSelect"),
@@ -405,7 +403,6 @@ function bindEvents() {
   });
 
   dom.addTextSourceButton.addEventListener("click", addTextSource);
-  dom.addLinkSourceButton.addEventListener("click", addLinkSource);
   dom.fileSourceInput.addEventListener("change", async () => {
     await addFiles(Array.from(dom.fileSourceInput.files || []));
     dom.fileSourceInput.value = "";
@@ -643,22 +640,26 @@ function addTextSource() {
   saveStateSoon();
 }
 
-function addLinkSource() {
+function syncLinkSourceFromInput() {
   const url = dom.linkUrlInput.value.trim();
+  const draft = activeDraft();
+  const existing = draft.sources.find((source) => source.type === "link");
   if (!url) {
-    showToast("Add a URL first.");
-    return;
+    if (existing) {
+      draft.sources = draft.sources.filter((source) => source.id !== existing.id);
+    }
+    return true;
   }
+
   let parsed;
   try {
     parsed = new URL(url);
   } catch {
     showToast("The URL is not valid.");
-    return;
+    return false;
   }
-  const title = dom.linkTitleInput.value.trim() || deriveLinkTitle(parsed);
-  const draft = activeDraft();
-  const existing = draft.sources.find((source) => source.type === "link");
+
+  const title = draft.title.trim() || deriveLinkTitle(parsed);
   if (existing) {
     existing.title = title;
     existing.url = parsed.href;
@@ -680,12 +681,7 @@ function addLinkSource() {
       createdAt: new Date().toISOString()
     });
   }
-  touchDraft(draft);
-  updatePrompt();
-  renderDraftBrowser();
-  renderSources();
-  saveStateSoon();
-  showToast("URL saved.");
+  return true;
 }
 
 async function addFiles(files) {
@@ -826,7 +822,6 @@ function render() {
   dom.proxyEndpointInput.value = DEFAULT_BACKEND_ENDPOINT;
   dom.backendEndpointInput.value = DEFAULT_BACKEND_ENDPOINT;
   const primaryLink = draft.sources.find((source) => source.type === "link");
-  dom.linkTitleInput.value = primaryLink?.title || "";
   dom.linkUrlInput.value = primaryLink?.url || "";
   dom.llmResultInput.value = draft.result || "";
   dom.llmResultInput.dir = "rtl";
@@ -1152,6 +1147,8 @@ function formatSourceForPrompt(source, index) {
 
 async function saveForProcessing() {
   const draft = activeDraft();
+  if (!syncLinkSourceFromInput()) return;
+
   if (!draft.sources.length) {
     showToast("Add at least one source first.");
     return;
@@ -1170,6 +1167,7 @@ async function saveForProcessing() {
   clearPersistentError();
   renderStatus();
   renderDraftNavigation();
+  renderSources();
   saveStateSoon();
 
   await pushBackendSync({
