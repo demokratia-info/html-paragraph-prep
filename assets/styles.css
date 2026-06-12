@@ -145,17 +145,10 @@ summary {
   grid-template-columns: minmax(250px, 0.8fr) minmax(300px, 1fr) minmax(360px, 1.1fr) minmax(340px, 1fr);
   gap: 16px;
   width: 100%;
-  height: calc(85vh - 60px);
-  min-height: 520px;
-  max-height: calc(85vh - 60px);
+  height: calc(100vh - 70px);
+  min-height: 0;
+  max-height: calc(100vh - 70px);
   padding: 16px;
-}
-
-@media (min-width: 1400px) {
-  .workspace {
-    width: min(100%, max(85vw, 1330px));
-    margin-inline: auto;
-  }
 }
 
 .panel {
@@ -163,6 +156,7 @@ summary {
   flex-direction: column;
   gap: 14px;
   min-width: 0;
+  min-height: 0;
   border: 1px solid var(--line);
   border-radius: var(--radius);
   background: var(--panel);
@@ -845,7 +839,7 @@ textarea:focus {
     grid-template-columns: minmax(280px, 0.9fr) minmax(360px, 1.1fr);
     width: 100%;
     height: auto;
-    min-height: calc(85vh - 60px);
+    min-height: calc(100vh - 70px);
     max-height: none;
   }
 
