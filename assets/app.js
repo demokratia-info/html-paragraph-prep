@@ -7,11 +7,12 @@ const DB_VERSION = 1;
 const DEFAULT_BACKEND_ENDPOINT = "https://summary-html-desk-openai.demokratia-info.workers.dev";
 const PASSWORD_SESSION_KEY = "summary-html-desk.editor-password.session";
 const PASSWORD_STORAGE_KEY = "summary-html-desk.editor-password.local";
-const MAX_PROMPT_SOURCE_CHARS = 80000;
 const MAX_BINARY_FILE_BYTES = 18 * 1024 * 1024;
 const SHARED_REFRESH_INTERVAL_MS = 60 * 1000;
 const DEFAULT_DRAFT_TITLE = "מקור חדש";
 const DEFAULT_DRAFT_TITLES = new Set(["", DEFAULT_DRAFT_TITLE, "מורק חדש", "New paper", "Untitled summary", "CMS summary"]);
+const OLD_DEFAULT_PROMPT_PREFIX = "You are preparing copy for a content management system.";
+const DEFAULT_PROMPT_FALLBACK = "";
 const DEFAULT_SUMMARY_OPTIONS = {
   language: "Hebrew",
   shape: "paragraphs",
@@ -52,8 +53,11 @@ const state = {
   activeId: null,
   db: null,
   settings: {
-    proxyEndpoint: DEFAULT_BACKEND_ENDPOINT
+    proxyEndpoint: DEFAULT_BACKEND_ENDPOINT,
+    defaultPrompt: ""
   },
+  defaultPrompt: DEFAULT_PROMPT_FALLBACK,
+  defaultPromptHistory: new Set(),
   draftSearch: "",
   draftStatusFilter: "all",
   activeSourceTab: "link",
@@ -172,6 +176,9 @@ async function loadState() {
     state.settings = { ...state.settings, ...savedSettings.value };
   }
   state.settings.proxyEndpoint = DEFAULT_BACKEND_ENDPOINT;
+  if (state.settings.defaultPrompt) {
+    rememberDefaultPrompt(state.settings.defaultPrompt);
+  }
 
   const active = await idbGet("settings", "active-id");
   state.activeId = active?.value || state.drafts[0]?.id || null;
@@ -246,6 +253,21 @@ async function saveState() {
     idbPut("settings", { key: "app-settings", value: state.settings })
   ]);
   dom.saveStatus.textContent = "Saved to browser database";
+}
+
+function rememberDefaultPrompt(prompt) {
+  const value = String(prompt || "").trim();
+  if (!value) return false;
+  if (value === state.defaultPrompt) {
+    state.defaultPromptHistory.add(value);
+    state.settings.defaultPrompt = value;
+    return false;
+  }
+  if (state.defaultPrompt) state.defaultPromptHistory.add(state.defaultPrompt);
+  state.defaultPrompt = value;
+  state.defaultPromptHistory.add(value);
+  state.settings.defaultPrompt = value;
+  return true;
 }
 
 function draftForStorage(draft) {
@@ -476,6 +498,7 @@ async function loginWithPassword(password) {
     return;
   }
 
+  await loadDefaultPrompt({ quiet: true });
   rememberEditorPassword(value);
   showWorkspace();
   showToast("Shared workspace opened.");
@@ -502,17 +525,20 @@ function showLogin(message = "") {
 
 function startAutoRefresh() {
   stopAutoRefresh();
-  state.autoRefreshTimer = window.setInterval(() => {
+  state.autoRefreshTimer = window.setInterval(async () => {
     if (!state.authenticated || state.syncBusy) return;
-    pullBackendSync({
-      skipConfirm: true,
-      quiet: true,
-      mergeRemote: true,
-      preserveFocusedField: true,
-      background: true
-    }).catch((error) => {
+    try {
+      await loadDefaultPrompt({ quiet: true });
+      await pullBackendSync({
+        skipConfirm: true,
+        quiet: true,
+        mergeRemote: true,
+        preserveFocusedField: true,
+        background: true
+      });
+    } catch (error) {
       console.warn("Background refresh failed", error);
-    });
+    }
   }, SHARED_REFRESH_INTERVAL_MS);
 }
 
@@ -790,7 +816,8 @@ function render() {
   dom.draftTitleInput.value = draft.title;
   dom.draftSearchInput.value = state.draftSearch;
   dom.draftStatusFilterInput.value = state.draftStatusFilter;
-  dom.promptOutput.value = draft.prompt || buildPrompt(draft);
+  dom.promptOutput.value = promptTextForDisplay(draft.prompt);
+  dom.promptOutput.dir = "rtl";
   dom.proxyEndpointInput.value = DEFAULT_BACKEND_ENDPOINT;
   dom.backendEndpointInput.value = DEFAULT_BACKEND_ENDPOINT;
   const primaryLink = draft.sources.find((source) => source.type === "link");
@@ -814,6 +841,20 @@ function renderStatus() {
   dom.modifiedTime.textContent = formatDateTime(draft.updatedAt);
   dom.processedTime.textContent = draft.processedAt ? formatDateTime(draft.processedAt) : "Not yet";
   dom.exportedTime.textContent = draft.exportedAt ? formatDateTime(draft.exportedAt) : "Not yet";
+  renderProcessingButtonLabel(draft);
+}
+
+function renderProcessingButtonLabel(draft) {
+  const label = hasGeneratedResult(draft) ? "Save for regeneration" : "Save for Processing";
+  const labelNode = dom.pushBackendButton.querySelector("span:last-child");
+  if (labelNode) labelNode.textContent = label;
+}
+
+function hasGeneratedResult(draft) {
+  const status = normalizeStatus(draft.status);
+  return status === "done"
+    || status === "exported"
+    || Boolean(draft.processedAt || draft.exportedAt || String(draft.result || "").trim());
 }
 
 function renderDraftSelect() {
@@ -1063,56 +1104,44 @@ function sourceMeta(source) {
 
 function updatePrompt() {
   const draft = activeDraft();
-  draft.prompt = buildPrompt(draft);
+  draft.prompt = buildPrompt();
   dom.promptOutput.value = draft.prompt;
   touchDraft(draft);
 }
 
-function buildPrompt(draft) {
-  const options = DEFAULT_SUMMARY_OPTIONS;
-  const language = options.language === "same" ? "the same language as the strongest source material" : options.language;
-  const shapeMap = {
-    paragraphs: `${options.paragraphCount} concise paragraphs`,
-    "heading-paragraphs": "one short heading followed by concise paragraphs",
-    "brief-list": "one short heading followed by a compact bullet list"
-  };
-  const toneMap = {
-    neutral: "neutral and factual",
-    academic: "careful, evidence-aware, and academic",
-    plain: "plain, direct, and readable"
-  };
-
-  const instructions = [
-    "You are preparing copy for a content management system.",
-    `Write in ${language}.`,
-    `Use a ${toneMap[options.tone] || "neutral and factual"} tone.`,
-    `Return ${shapeMap[options.shape] || shapeMap.paragraphs}.`,
-    "Return only editable summary text. Do not return HTML.",
-    "Use blank lines between paragraphs. For a list, use simple bullet lines.",
-    "Do not include Markdown fences, CSS, inline styles, tables, footnotes, or commentary.",
-    "Preserve important names, dates, numbers, and causal claims. Do not invent facts.",
-    "Most sources and summaries are in Hebrew. Keep Hebrew names, titles, dates, and institutional terms accurate.",
-    "If a source is a public document URL, open/read the document before summarizing when your environment allows it.",
-    "If a source is only a URL and you cannot access it, say that the URL needs source text rather than guessing.",
-    options.includeLinks ? "Mention useful source links in plain text when they directly support the summary." : "Do not include links unless the URL itself is central to the summary."
-  ];
-
-  const sourceText = draft.sources.length ? draft.sources.map(formatSourceForPrompt).join("\n\n") : "No sources have been added yet.";
-  const clipped = clipText(sourceText, MAX_PROMPT_SOURCE_CHARS);
-  return `${instructions.join("\n")}\n\nSources:\n${clipped}`;
+function buildPrompt() {
+  return state.defaultPrompt || DEFAULT_PROMPT_FALLBACK;
 }
 
-function formatSourceForPrompt(source, index) {
-  const heading = [`[Source ${index + 1}: ${source.title || "Untitled"}]`];
-  if (source.url) heading.push(`URL: ${source.url}`);
-  if (source.filename) heading.push(`File: ${source.filename} (${formatBytes(source.size)})`);
-  if (source.textAvailable && source.text) {
-    return `${heading.join("\n")}\nTEXT:\n${source.text}`;
+function promptTextForDisplay(prompt) {
+  return isDefaultPromptText(prompt) ? buildPrompt() : prompt;
+}
+
+function isDefaultPromptText(prompt) {
+  const value = String(prompt || "").trim();
+  return !value
+    || value === state.defaultPrompt
+    || state.defaultPromptHistory.has(value)
+    || (value.startsWith(OLD_DEFAULT_PROMPT_PREFIX) && value.includes("\n\nSources:\n"));
+}
+
+async function loadDefaultPrompt(options = {}) {
+  try {
+    const payload = await backendPost({ action: "loadDefaultPrompt" });
+    const changed = rememberDefaultPrompt(payload.prompt || "");
+    if (changed) {
+      const draft = activeDraft();
+      if (draft && isDefaultPromptText(draft.prompt) && document.activeElement !== dom.promptOutput) {
+        dom.promptOutput.value = buildPrompt();
+      }
+      await saveState();
+    }
+    return Boolean(state.defaultPrompt);
+  } catch (error) {
+    if (!options.quiet) showToast(error.message || "Could not load default prompt.");
+    console.warn("Default prompt load failed", error);
+    return false;
   }
-  if (source.fileAvailable || state.volatileFiles.has(source.id)) {
-    return `${heading.join("\n")}\nFILE ATTACHMENT: use the uploaded PDF, Word, or binary document content.`;
-  }
-  return `${heading.join("\n")}\nTEXT: not available in this browser draft.`;
 }
 
 async function saveForProcessing() {
@@ -1125,10 +1154,15 @@ async function saveForProcessing() {
   }
 
   const editedPrompt = dom.promptOutput.value.trim();
-  draft.prompt = String(draft.prompt || "").trim() ? editedPrompt || buildPrompt(draft) : buildPrompt(draft);
+  draft.prompt = isDefaultPromptText(draft.prompt) ? buildPrompt() : editedPrompt || buildPrompt();
   dom.promptOutput.value = draft.prompt;
+  const clearStaleHtml = shouldClearHtmlForProcessing(draft);
   draft.result = dom.llmResultInput.value;
-  draft.html = dom.htmlOutput.value;
+  if (clearStaleHtml) {
+    clearHtmlForRegeneration(draft);
+  } else {
+    draft.html = dom.htmlOutput.value;
+  }
   draft.status = "pending";
   draft.queuedAt = new Date().toISOString();
   draft.processingStartedAt = "";
@@ -1146,6 +1180,20 @@ async function saveForProcessing() {
     doneMessage: `"${draft.title}" is waiting for processing.`,
     toastMessage: "Saved for processing."
   });
+}
+
+function shouldClearHtmlForProcessing(draft) {
+  const status = normalizeStatus(draft.status);
+  return status === "done"
+    || status === "exported"
+    || Boolean(draft.processedAt || draft.exportedAt || String(draft.result || "").trim() || String(draft.html || "").trim());
+}
+
+function clearHtmlForRegeneration(draft) {
+  draft.html = "";
+  draft.htmlCreatedAt = "";
+  dom.htmlOutput.value = "";
+  dom.preview.innerHTML = "<p></p>";
 }
 
 async function saveResultText() {
@@ -1489,6 +1537,9 @@ function isWorkspaceFormFieldFocused() {
 function renderSharedOutputFields() {
   const draft = activeDraft();
   syncFieldUnlessFocused(dom.draftTitleInput, draft.title || "");
+  if (isDefaultPromptText(draft.prompt)) {
+    syncFieldUnlessFocused(dom.promptOutput, buildPrompt());
+  }
   syncFieldUnlessFocused(dom.llmResultInput, draft.result || "");
   syncFieldUnlessFocused(dom.htmlOutput, draft.html || "");
   if (document.activeElement !== dom.htmlOutput) {

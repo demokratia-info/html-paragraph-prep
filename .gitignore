@@ -7,3 +7,4 @@ dist/
 *.log
 .codex-processing/
 summary-cron.log
+prompt.txt

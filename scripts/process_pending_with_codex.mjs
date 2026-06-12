@@ -12,6 +12,8 @@ const [GITHUB_OWNER, GITHUB_REPO] = DATA_REPO.split("/");
 const GITHUB_BRANCH = process.env.DATA_BRANCH || "main";
 const DATA_BASE_PATH = cleanBasePath(process.env.DATA_BASE_PATH || "summary-html-desk");
 const STATE_PATH = `${DATA_BASE_PATH}/drafts.json`;
+const DEFAULT_PROMPT_PATH = `${DATA_BASE_PATH}/default-prompt.txt`;
+const LOCAL_PROMPT_PATH = path.join(REPO_ROOT, "prompt.txt");
 const MAX_PENDING_PER_RUN = clamp(Number(process.env.MAX_PENDING_PER_RUN || 1), 1, 20);
 const MAX_SOURCE_CHARS = clamp(Number(process.env.MAX_SOURCE_CHARS || 120000), 1000, 500000);
 const CODEX_TIMEOUT_MS = clamp(Number(process.env.CODEX_TIMEOUT_MS || 45 * 60 * 1000), 60 * 1000, 3 * 60 * 60 * 1000);
@@ -35,6 +37,11 @@ main().catch((error) => {
 
 async function main() {
   ensureDir(PROCESSING_ROOT);
+  if (process.argv.includes("--sync-default-prompt")) {
+    syncDefaultPrompt();
+    log("Default prompt sync complete.");
+    return;
+  }
 
   let processed = 0;
   for (let index = 0; index < MAX_PENDING_PER_RUN; index += 1) {
@@ -55,6 +62,25 @@ async function main() {
   }
 
   log(`Processed ${processed} item${processed === 1 ? "" : "s"}.`);
+}
+
+function syncDefaultPrompt() {
+  if (!fs.existsSync(LOCAL_PROMPT_PATH)) return;
+  const localPrompt = fs.readFileSync(LOCAL_PROMPT_PATH, "utf8").trim();
+  if (!localPrompt) return;
+
+  const existing = githubGetContent(DEFAULT_PROMPT_PATH);
+  const existingText = existing?.content
+    ? Buffer.from(stripBase64Whitespace(existing.content), "base64").toString("utf8").trim()
+    : "";
+  if (existingText === localPrompt) return;
+
+  githubPutContent(
+    DEFAULT_PROMPT_PATH,
+    Buffer.from(`${localPrompt}\n`, "utf8").toString("base64"),
+    "Update default summary prompt"
+  );
+  log("Default prompt updated in shared storage.");
 }
 
 async function processDraft(state, draft) {

@@ -6,6 +6,7 @@ const DEFAULT_DATA_REPO = "html-paragraph-prep-data";
 const DEFAULT_BRANCH = "main";
 const DEFAULT_BASE_PATH = "summary-html-desk";
 const DEFAULT_REASONING_EFFORT = "xhigh";
+const DEFAULT_PROMPT_FILENAME = "default-prompt.txt";
 const MAX_TEXT_SOURCE_CHARS = 120000;
 const MAX_FILE_DATA_CHARS = 28 * 1024 * 1024;
 
@@ -34,6 +35,8 @@ export default {
           return json(await saveSharedState(payload, env), 200, corsHeaders);
         case "loadSharedState":
           return json(await loadSharedState(env), 200, corsHeaders);
+        case "loadDefaultPrompt":
+          return json(await loadDefaultPrompt(env), 200, corsHeaders);
         case "getSourceFile":
           return json(await getSourceFile(payload, env), 200, corsHeaders);
         case "checkStorage":
@@ -191,6 +194,21 @@ async function loadSharedState(env) {
     };
   }
   return JSON.parse(base64ToUtf8(item.content));
+}
+
+async function loadDefaultPrompt(env) {
+  const config = githubConfig(env);
+  const item = await githubGetContent(config, defaultPromptPath(config));
+  if (!item?.content) {
+    return {
+      prompt: "",
+      updatedAt: null
+    };
+  }
+  return {
+    prompt: base64ToUtf8(item.content).trim(),
+    updatedAt: item.committer?.date || null
+  };
 }
 
 async function getSourceFile(payload, env) {
@@ -425,6 +443,10 @@ function httpError(message, status) {
 
 function sharedStatePath(config) {
   return `${config.basePath}/drafts.json`;
+}
+
+function defaultPromptPath(config) {
+  return `${config.basePath}/${DEFAULT_PROMPT_FILENAME}`;
 }
 
 function githubItemDataUrl(item, source) {

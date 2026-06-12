@@ -237,7 +237,12 @@ textarea#llmResultInput {
   text-align: right;
 }
 
-textarea#promptOutput,
+textarea#promptOutput {
+  direction: rtl;
+  text-align: right;
+  line-height: 1.6;
+}
+
 textarea#htmlOutput {
   font-family: var(--mono);
   font-size: 13px;
