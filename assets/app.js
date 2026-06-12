@@ -58,6 +58,7 @@ const state = {
   },
   defaultPrompt: DEFAULT_PROMPT_FALLBACK,
   defaultPromptHistory: new Set(),
+  remoteDraftIds: new Set(),
   draftSearch: "",
   draftStatusFilter: "all",
   activeSourceTab: "link",
@@ -1473,6 +1474,7 @@ async function pushBackendSync(options = {}) {
       action: "saveSharedState",
       payload
     });
+    state.remoteDraftIds = new Set(state.drafts.map((draft) => draft.id));
     await saveState();
     setSyncStatus(options.doneMessage || `Saved ${state.drafts.length} items and ${uploadedFiles} origin files.`);
     showToast(options.toastMessage || "Saved.");
@@ -1503,7 +1505,8 @@ async function pullBackendSync(options = {}) {
     if (!payload || !Array.isArray(payload.drafts)) throw new Error("Shared drafts file is invalid.");
 
     const remoteDrafts = payload.drafts.map(normalizeDraft).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
-    state.drafts = options.mergeRemote ? mergeRemoteDrafts(remoteDrafts) : remoteDrafts;
+    const remoteIds = new Set(remoteDrafts.map((draft) => draft.id));
+    state.drafts = options.mergeRemote ? mergeRemoteDrafts(remoteDrafts, remoteIds) : remoteDrafts;
     if (!state.drafts.length) {
       state.drafts = [createDraft()];
     }
@@ -1514,6 +1517,7 @@ async function pullBackendSync(options = {}) {
 
     await idbClear("drafts");
     if (!options.mergeRemote) await idbClear("files");
+    state.remoteDraftIds = remoteIds;
     await saveState();
     renderAfterSharedRefresh(Boolean(options.preserveFocusedField));
     if (!options.background) setSyncStatus(`Loaded ${state.drafts.length} shared items.`);
@@ -1528,9 +1532,8 @@ async function pullBackendSync(options = {}) {
   }
 }
 
-function mergeRemoteDrafts(remoteDrafts) {
+function mergeRemoteDrafts(remoteDrafts, remoteIds) {
   const localById = new Map(state.drafts.map((draft) => [draft.id, draft]));
-  const remoteIds = new Set(remoteDrafts.map((draft) => draft.id));
   const merged = remoteDrafts.map((remoteDraft) => {
     const localDraft = localById.get(remoteDraft.id);
     if (!localDraft) return remoteDraft;
@@ -1539,6 +1542,7 @@ function mergeRemoteDrafts(remoteDrafts) {
   });
 
   for (const localDraft of state.drafts) {
+    if (state.remoteDraftIds.has(localDraft.id)) continue;
     if (!remoteIds.has(localDraft.id)) merged.push(localDraft);
   }
 
