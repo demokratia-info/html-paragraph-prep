@@ -124,6 +124,8 @@ async function processDraft(state, draft) {
       freshDraft.result = resultText;
       freshDraft.html = resultHtml;
       freshDraft.htmlCreatedAt = resultHtml ? processedAt : "";
+      freshDraft.exportedAt = "";
+      freshDraft.editedAfterGeneration = false;
       if (shouldReplaceDraftTitle(freshDraft.title) && derivedTitle) {
         freshDraft.title = derivedTitle;
       }

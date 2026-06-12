@@ -20,7 +20,7 @@ const DEFAULT_SUMMARY_OPTIONS = {
   tone: "neutral",
   includeLinks: true
 };
-const VALID_STATUSES = new Set(["draft", "pending", "processing", "done", "error", "exported"]);
+const VALID_STATUSES = new Set(["draft", "pending", "processing", "done", "error"]);
 const STATUS_TEXT = {
   draft: {
     label: "Draft",
@@ -41,10 +41,6 @@ const STATUS_TEXT = {
   error: {
     label: "Needs Attention",
     detail: "Processing failed. Check the error message."
-  },
-  exported: {
-    label: "Exported",
-    detail: "HTML was copied for the CMS"
   }
 };
 
@@ -123,6 +119,7 @@ const dom = {
   runProxyButton: $("#runProxyButton"),
   llmResultInput: $("#llmResultInput"),
   copyResultButton: $("#copyResultButton"),
+  exportedCheckbox: $("#exportedCheckbox"),
   refreshHtmlButton: $("#refreshHtmlButton"),
   copyHtmlButton: $("#copyHtmlButton"),
   downloadHtmlButton: $("#downloadHtmlButton"),
@@ -156,6 +153,7 @@ function createDraft(title = DEFAULT_DRAFT_TITLE) {
     processedAt: "",
     exportedAt: "",
     htmlCreatedAt: "",
+    editedAfterGeneration: false,
     processingError: "",
     processingRunId: "",
     createdAt: now,
@@ -196,17 +194,22 @@ async function loadState() {
 
 function normalizeDraft(draft) {
   const fresh = createDraft();
+  const hadLegacyExportedStatus = String(draft.status || "").trim() === "exported";
   const normalized = {
     ...fresh,
     ...draft,
     sources: Array.isArray(draft.sources) ? draft.sources.map(normalizeSource) : []
   };
+  if (hadLegacyExportedStatus && !normalized.exportedAt) {
+    normalized.exportedAt = normalized.htmlCreatedAt || normalized.processedAt || normalized.updatedAt || "";
+  }
   normalized.status = normalizeStatus(normalized.status);
   normalized.queuedAt = normalized.queuedAt || "";
   normalized.processingStartedAt = normalized.processingStartedAt || "";
   normalized.processedAt = normalized.processedAt || "";
   normalized.exportedAt = normalized.exportedAt || "";
   normalized.htmlCreatedAt = normalized.htmlCreatedAt || "";
+  normalized.editedAfterGeneration = Boolean(normalized.editedAfterGeneration);
   normalized.processingError = normalized.processingError || "";
   normalized.processingRunId = normalized.processingRunId || "";
   Object.assign(normalized, DEFAULT_SUMMARY_OPTIONS);
@@ -215,6 +218,7 @@ function normalizeDraft(draft) {
 
 function normalizeStatus(status) {
   const value = String(status || "draft").trim();
+  if (value === "exported") return "done";
   return VALID_STATUSES.has(value) ? value : "draft";
 }
 
@@ -473,15 +477,20 @@ function bindEvents() {
 
   dom.llmResultInput.addEventListener("input", () => {
     const draft = activeDraft();
-    draft.result = dom.llmResultInput.value;
-    if (draft.status === "exported") draft.status = "done";
+    const changed = setResultFromEditor(draft);
     updateHtml(false);
     touchDraft(draft);
     renderStatus();
+    if (changed) renderDraftNavigation();
     saveStateSoon();
   });
 
   dom.copyResultButton.addEventListener("click", () => copyText(dom.llmResultInput.value, "Result copied."));
+  dom.exportedCheckbox.addEventListener("change", () => {
+    setExportedFromCheckbox().catch((error) => {
+      showToast(error.message || "Could not save export marker.");
+    });
+  });
   dom.refreshHtmlButton?.addEventListener("click", () => createHtmlFromResult());
   dom.copyHtmlButton?.addEventListener("click", copyHtmlAndMarkExported);
   dom.downloadHtmlButton.addEventListener("click", () => {
@@ -631,6 +640,36 @@ function switchSourceTab(tab) {
 
 function touchDraft(draft) {
   draft.updatedAt = new Date().toISOString();
+}
+
+function setResultFromEditor(draft) {
+  const nextResult = dom.llmResultInput.value;
+  const changed = String(draft.result || "") !== String(nextResult || "");
+  draft.result = nextResult;
+  if (!changed) return false;
+  clearExportMarker(draft);
+  if (draft.processedAt) draft.editedAfterGeneration = true;
+  return true;
+}
+
+function clearExportMarker(draft) {
+  draft.exportedAt = "";
+  if (String(draft.status || "").trim() === "exported") draft.status = "done";
+  if (dom.exportedCheckbox) dom.exportedCheckbox.checked = false;
+}
+
+function markExported(draft) {
+  draft.exportedAt = new Date().toISOString();
+  if (String(draft.status || "").trim() === "exported") draft.status = "done";
+  if (dom.exportedCheckbox) dom.exportedCheckbox.checked = true;
+}
+
+function isDraftExported(draft) {
+  return Boolean(draft?.exportedAt) || String(draft?.status || "").trim() === "exported";
+}
+
+function hasEditedAfterGeneration(draft) {
+  return Boolean(draft?.editedAfterGeneration);
 }
 
 function addTextSource() {
@@ -861,6 +900,7 @@ function renderStatus() {
   dom.modifiedTime.textContent = formatDateTime(draft.updatedAt);
   dom.processedTime.textContent = draft.processedAt ? formatDateTime(draft.processedAt) : "Not yet";
   dom.exportedTime.textContent = draft.exportedAt ? formatDateTime(draft.exportedAt) : "Not yet";
+  dom.exportedCheckbox.checked = isDraftExported(draft);
   renderProcessingButtonLabel(draft);
 }
 
@@ -873,7 +913,6 @@ function renderProcessingButtonLabel(draft) {
 function hasGeneratedResult(draft) {
   const status = normalizeStatus(draft.status);
   return status === "done"
-    || status === "exported"
     || Boolean(draft.processedAt || draft.exportedAt || String(draft.result || "").trim());
 }
 
@@ -888,7 +927,8 @@ function renderDraftSelect() {
     ...draftsForOptions.map((draft) => {
       const option = document.createElement("option");
       option.value = draft.id;
-      option.textContent = `${draft.title || DEFAULT_DRAFT_TITLE} · ${statusLabel(draft.status)} · ${draft.sources.length} sources`;
+      const editedMarker = hasEditedAfterGeneration(draft) ? " *" : "";
+      option.textContent = `${draft.title || DEFAULT_DRAFT_TITLE}${editedMarker} · ${statusLabel(draft.status)} · ${draft.sources.length} sources`;
       return option;
     })
   );
@@ -920,6 +960,14 @@ function renderDraftBrowser() {
       top.className = "draft-card-top";
       const title = document.createElement("strong");
       title.textContent = draft.title || DEFAULT_DRAFT_TITLE;
+      if (hasEditedAfterGeneration(draft)) {
+        title.append(" ");
+        const marker = document.createElement("span");
+        marker.className = "edited-marker";
+        marker.textContent = "*";
+        marker.title = "Text was edited after the last generation";
+        title.append(marker);
+      }
       const badge = document.createElement("span");
       badge.className = `status-badge status-${normalizeStatus(draft.status)}`;
       badge.textContent = statusLabel(draft.status);
@@ -928,9 +976,9 @@ function renderDraftBrowser() {
       const meta = document.createElement("p");
       meta.textContent = [
         `${draft.sources.length} source${draft.sources.length === 1 ? "" : "s"}`,
-        `modified ${formatDateTime(draft.updatedAt)}`,
-        draft.processedAt ? `processed ${formatDateTime(draft.processedAt)}` : "",
-        draft.exportedAt ? `exported ${formatDateTime(draft.exportedAt)}` : ""
+        `last modified ${formatDateTime(draft.updatedAt)}`,
+        draft.processedAt ? `last generated ${formatDateTime(draft.processedAt)}` : "",
+        draft.exportedAt ? `last exported ${formatDateTime(draft.exportedAt)}` : ""
       ].filter(Boolean).join(" · ");
 
       const sources = document.createElement("p");
@@ -966,7 +1014,10 @@ function draftMatchesStatusFilter(draft, filter) {
     return Boolean(String(draft.result || "").trim())
       && status !== "pending"
       && status !== "processing"
-      && status !== "exported";
+      && !isDraftExported(draft);
+  }
+  if (filter === "exported") {
+    return isDraftExported(draft);
   }
   return status === filter;
 }
@@ -1231,9 +1282,10 @@ async function saveForProcessing() {
   draft.prompt = isDefaultPromptText(draft.prompt) ? buildPrompt() : editedPrompt || buildPrompt();
   dom.promptOutput.value = draft.prompt;
   const clearStaleHtml = shouldClearHtmlForProcessing(draft);
-  draft.result = dom.llmResultInput.value;
+  setResultFromEditor(draft);
   if (clearStaleHtml) {
     clearHtmlForRegeneration(draft);
+    clearExportMarker(draft);
   } else {
     draft.html = dom.htmlOutput.value;
   }
@@ -1259,8 +1311,7 @@ async function saveForProcessing() {
 function shouldClearHtmlForProcessing(draft) {
   const status = normalizeStatus(draft.status);
   return status === "done"
-    || status === "exported"
-    || Boolean(draft.processedAt || draft.exportedAt || String(draft.result || "").trim() || String(draft.html || "").trim());
+    || Boolean(draft.processedAt || isDraftExported(draft) || String(draft.result || "").trim() || String(draft.html || "").trim());
 }
 
 function clearHtmlForRegeneration(draft) {
@@ -1272,13 +1323,13 @@ function clearHtmlForRegeneration(draft) {
 
 async function saveResultText() {
   const draft = activeDraft();
-  draft.result = dom.llmResultInput.value;
+  const changed = setResultFromEditor(draft);
   updateHtml(false);
-  if (draft.status === "exported") draft.status = "done";
   draft.processingError = "";
   touchDraft(draft);
   clearPersistentError();
   renderStatus();
+  if (changed) renderDraftNavigation();
   saveStateSoon();
 
   await pushBackendSync({
@@ -1290,7 +1341,7 @@ async function saveResultText() {
 
 function createHtmlFromResult(showMessage = true) {
   const draft = activeDraft();
-  draft.result = dom.llmResultInput.value;
+  setResultFromEditor(draft);
   const html = makeCmsHtml(draft.result || "");
   if (!html) {
     showToast("Add result text first.");
@@ -1299,7 +1350,6 @@ function createHtmlFromResult(showMessage = true) {
 
   draft.html = html;
   draft.htmlCreatedAt = new Date().toISOString();
-  if (draft.status === "exported") draft.status = "done";
   dom.htmlOutput.value = html;
   dom.preview.innerHTML = html;
   touchDraft(draft);
@@ -1316,8 +1366,7 @@ async function copyHtmlAndMarkExported() {
 
   const draft = activeDraft();
   draft.html = dom.htmlOutput.value;
-  draft.status = "exported";
-  draft.exportedAt = new Date().toISOString();
+  markExported(draft);
   draft.processingError = "";
   clearPersistentError();
   renderStatus();
@@ -1328,6 +1377,35 @@ async function copyHtmlAndMarkExported() {
     busyMessage: "Saving export status...",
     doneMessage: "HTML copied and item marked exported.",
     toastMessage: "HTML copied and saved."
+  });
+}
+
+async function setExportedFromCheckbox() {
+  const draft = activeDraft();
+  if (dom.exportedCheckbox.checked) {
+    setResultFromEditor(draft);
+    const html = updateHtml(false);
+    if (!html) {
+      dom.exportedCheckbox.checked = false;
+      showToast("Add result text first.");
+      return;
+    }
+    markExported(draft);
+  } else {
+    clearExportMarker(draft);
+  }
+
+  draft.processingError = "";
+  touchDraft(draft);
+  clearPersistentError();
+  renderStatus();
+  renderDraftNavigation();
+  await saveState();
+
+  await pushBackendSync({
+    busyMessage: "Saving export marker...",
+    doneMessage: dom.exportedCheckbox.checked ? "Summary marked as exported." : "Summary marked as not exported.",
+    toastMessage: dom.exportedCheckbox.checked ? "Marked exported." : "Export marker cleared."
   });
 }
 
@@ -1353,7 +1431,12 @@ async function runProxySummary() {
 
     const text = payload.html || payload.text || "";
     if (!text) throw new Error("Proxy response did not include text.");
+    const processedAt = new Date().toISOString();
     draft.result = text;
+    draft.status = "done";
+    draft.processedAt = processedAt;
+    draft.editedAfterGeneration = false;
+    clearExportMarker(draft);
     dom.llmResultInput.value = text;
     touchDraft(draft);
     updateHtml();
@@ -1549,9 +1632,10 @@ function mergeActiveDraftFromRemote(localDraft, remoteDraft) {
     "processingError",
     "processedAt",
     "exportedAt",
-    "htmlCreatedAt"
+    "htmlCreatedAt",
+    "editedAfterGeneration"
   ].forEach((field) => {
-    merged[field] = remoteDraft[field] || "";
+    merged[field] = field === "editedAfterGeneration" ? Boolean(remoteDraft[field]) : remoteDraft[field] || "";
   });
 
   if (shouldUseRemoteResult(localDraft, remoteDraft)) {
@@ -1884,7 +1968,7 @@ function importedDraftCopy(draft) {
 
 async function downloadHtml() {
   const draft = activeDraft();
-  draft.result = dom.llmResultInput.value;
+  setResultFromEditor(draft);
   const html = updateHtml(false);
   if (!html) {
     showToast("Add result text first.");
@@ -1902,8 +1986,7 @@ ${html}
 </html>
 `;
   downloadBlob(documentHtml, `${slugify(draft.title)}.html`, "text/html");
-  draft.status = "exported";
-  draft.exportedAt = new Date().toISOString();
+  markExported(draft);
   draft.processingError = "";
   touchDraft(draft);
   clearPersistentError();

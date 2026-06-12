@@ -551,6 +551,18 @@ textarea:focus {
   min-height: 18px;
 }
 
+.export-check {
+  justify-content: flex-start;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 750;
+}
+
+.edited-marker {
+  color: var(--danger);
+  font-weight: 900;
+}
+
 .proxy-box {
   border: 1px solid var(--line);
   border-radius: var(--radius);
