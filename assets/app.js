@@ -378,13 +378,23 @@ function bindEvents() {
       return;
     }
     const draft = activeDraft();
-    if (!window.confirm(`Delete "${draft.title}"?`)) return;
+    const title = draft.title || DEFAULT_DRAFT_TITLE;
+    if (!window.confirm([
+      `Delete "${title}"?`,
+      "",
+      "This operation cannot be undone."
+    ].join("\n"))) return;
     await deleteDraftFiles(draft);
     await idbDelete("drafts", draft.id);
     state.drafts = state.drafts.filter((item) => item.id !== draft.id);
     state.activeId = state.drafts[0].id;
     render();
-    saveStateSoon();
+    await saveState();
+    await pushBackendSync({
+      busyMessage: "Deleting source...",
+      doneMessage: `"${title}" was deleted from the shared workspace.`,
+      toastMessage: "Source deleted."
+    });
   });
 
   dom.draftSelect.addEventListener("change", () => {
