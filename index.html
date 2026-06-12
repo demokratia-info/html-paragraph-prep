@@ -112,7 +112,7 @@
           <input id="draftTitleInput" type="text" dir="rtl" autocomplete="off" spellcheck="true">
         </label>
 
-        <div class="status-panel" aria-label="Item status">
+        <div class="visually-hidden" aria-hidden="true">
           <div class="status-main">
             <span class="status-badge" id="statusBadge">Draft</span>
             <span id="statusUpdated">Not sent for processing yet</span>
@@ -164,7 +164,7 @@
 
         <label class="field prompt-field">
           <span>Prompt for Codex</span>
-          <textarea id="promptOutput" rows="12" dir="rtl" spellcheck="false"></textarea>
+          <textarea id="promptOutput" rows="8" dir="rtl" spellcheck="false"></textarea>
         </label>
 
         <button class="button primary full" id="pushBackendButton" type="button">

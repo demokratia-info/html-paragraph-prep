@@ -145,9 +145,17 @@ summary {
   grid-template-columns: minmax(250px, 0.8fr) minmax(300px, 1fr) minmax(360px, 1.1fr) minmax(340px, 1fr);
   gap: 16px;
   width: 100%;
-  min-height: calc(100vh - 70px);
-  max-height: calc(100vh - 70px);
+  height: calc(85vh - 60px);
+  min-height: 520px;
+  max-height: calc(85vh - 60px);
   padding: 16px;
+}
+
+@media (min-width: 1400px) {
+  .workspace {
+    width: min(100%, max(85vw, 1330px));
+    margin-inline: auto;
+  }
 }
 
 .panel {
@@ -405,12 +413,12 @@ textarea:focus {
 
 .prompt-field {
   flex: 1;
-  min-height: 220px;
+  min-height: 150px;
 }
 
 .prompt-field textarea {
   flex: 1;
-  min-height: 220px;
+  min-height: 150px;
 }
 
 .draft-browser {
@@ -657,7 +665,7 @@ textarea:focus {
 
 .panel-brief #llmResultInput {
   flex: 1;
-  min-height: 420px;
+  min-height: 340px;
 }
 
 .preview-shell {
@@ -714,7 +722,7 @@ textarea:focus {
 
 .cms-preview {
   flex: 1;
-  min-height: 200px;
+  min-height: 160px;
   overflow: auto;
   padding: 16px;
   background: #fff;
@@ -835,6 +843,9 @@ textarea:focus {
 @media (max-width: 1180px) {
   .workspace {
     grid-template-columns: minmax(280px, 0.9fr) minmax(360px, 1.1fr);
+    width: 100%;
+    height: auto;
+    min-height: calc(85vh - 60px);
     max-height: none;
   }
 
@@ -863,6 +874,7 @@ textarea:focus {
   .workspace {
     grid-template-columns: 1fr;
     min-height: auto;
+    height: auto;
     padding: 10px;
   }
 
