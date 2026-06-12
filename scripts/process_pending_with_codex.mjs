@@ -122,6 +122,7 @@ async function processDraft(state, draft) {
     finalizeDraft(draft.id, runId, (freshDraft) => {
       const processedAt = new Date().toISOString();
       freshDraft.result = resultText;
+      freshDraft.regenerationBaseResult = "";
       freshDraft.html = resultHtml;
       freshDraft.htmlCreatedAt = resultHtml ? processedAt : "";
       freshDraft.exportedAt = "";
@@ -342,7 +343,7 @@ function runCodex(prompt, resultPath) {
 
 function buildCodexPrompt(draft, sources) {
   const savedPrompt = String(draft.prompt || "").trim() || defaultPromptFromDraft(draft);
-  const previousResult = String(draft.result || "").trim();
+  const previousResult = String(draft.regenerationBaseResult || draft.result || "").trim();
   const previousInstruction = previousResult
     ? [
       "This item already has a previous result.",

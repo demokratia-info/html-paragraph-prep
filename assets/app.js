@@ -145,6 +145,7 @@ function createDraft(title = DEFAULT_DRAFT_TITLE) {
     ...DEFAULT_SUMMARY_OPTIONS,
     prompt: "",
     result: "",
+    regenerationBaseResult: "",
     html: "",
     direction: "auto",
     status: "draft",
@@ -209,6 +210,7 @@ function normalizeDraft(draft) {
   normalized.processedAt = normalized.processedAt || "";
   normalized.exportedAt = normalized.exportedAt || "";
   normalized.htmlCreatedAt = normalized.htmlCreatedAt || "";
+  normalized.regenerationBaseResult = normalized.regenerationBaseResult || "";
   normalized.editedAfterGeneration = Boolean(normalized.editedAfterGeneration);
   normalized.processingError = normalized.processingError || "";
   normalized.processingRunId = normalized.processingRunId || "";
@@ -648,6 +650,7 @@ function setResultFromEditor(draft) {
   draft.result = nextResult;
   if (!changed) return false;
   clearExportMarker(draft);
+  if (String(nextResult || "").trim()) draft.regenerationBaseResult = "";
   if (draft.processedAt) draft.editedAfterGeneration = true;
   return true;
 }
@@ -905,7 +908,7 @@ function renderStatus() {
 }
 
 function renderProcessingButtonLabel(draft) {
-  const label = hasGeneratedResult(draft) ? "Save for regeneration" : "Save for Processing";
+  const label = hasGeneratedResult(draft) ? "Save and Regenerate" : "Save for Processing";
   const labelNode = dom.pushBackendButton.querySelector("span:last-child");
   if (labelNode) labelNode.textContent = label;
 }
@@ -1284,9 +1287,11 @@ async function saveForProcessing() {
   const clearStaleHtml = shouldClearHtmlForProcessing(draft);
   setResultFromEditor(draft);
   if (clearStaleHtml) {
-    clearHtmlForRegeneration(draft);
+    draft.regenerationBaseResult = draft.result || draft.regenerationBaseResult || "";
+    clearOutputForRegeneration(draft);
     clearExportMarker(draft);
   } else {
+    draft.regenerationBaseResult = "";
     draft.html = dom.htmlOutput.value;
   }
   draft.status = "pending";
@@ -1314,9 +1319,11 @@ function shouldClearHtmlForProcessing(draft) {
     || Boolean(draft.processedAt || isDraftExported(draft) || String(draft.result || "").trim() || String(draft.html || "").trim());
 }
 
-function clearHtmlForRegeneration(draft) {
+function clearOutputForRegeneration(draft) {
+  draft.result = "";
   draft.html = "";
   draft.htmlCreatedAt = "";
+  dom.llmResultInput.value = "";
   dom.htmlOutput.value = "";
   dom.preview.innerHTML = "<p></p>";
 }
@@ -1633,6 +1640,7 @@ function mergeActiveDraftFromRemote(localDraft, remoteDraft) {
     "processedAt",
     "exportedAt",
     "htmlCreatedAt",
+    "regenerationBaseResult",
     "editedAfterGeneration"
   ].forEach((field) => {
     merged[field] = field === "editedAfterGeneration" ? Boolean(remoteDraft[field]) : remoteDraft[field] || "";
