@@ -295,6 +295,17 @@ textarea:focus {
   background: #f1f5f8;
 }
 
+.button.danger {
+  border-color: #f3b7ad;
+  background: #fff4f2;
+  color: var(--danger);
+}
+
+.button.danger:hover {
+  border-color: #ea9b8d;
+  background: #ffe6e1;
+}
+
 .button:disabled,
 .icon-button:disabled {
   cursor: not-allowed;
