@@ -464,16 +464,21 @@ function bindEvents() {
     const draft = activeDraft();
     draft.result = dom.llmResultInput.value;
     if (draft.status === "exported") draft.status = "done";
+    updateHtml(false);
     touchDraft(draft);
     renderStatus();
     saveStateSoon();
   });
 
   dom.copyResultButton.addEventListener("click", () => copyText(dom.llmResultInput.value, "Result copied."));
-  dom.refreshHtmlButton.addEventListener("click", () => createHtmlFromResult());
-  dom.copyHtmlButton.addEventListener("click", copyHtmlAndMarkExported);
-  dom.downloadHtmlButton.addEventListener("click", downloadHtml);
-  dom.toggleDirectionButton.addEventListener("click", togglePreviewDirection);
+  dom.refreshHtmlButton?.addEventListener("click", () => createHtmlFromResult());
+  dom.copyHtmlButton?.addEventListener("click", copyHtmlAndMarkExported);
+  dom.downloadHtmlButton.addEventListener("click", () => {
+    downloadHtml().catch((error) => {
+      showToast(error.message || "Download failed.");
+    });
+  });
+  dom.toggleDirectionButton?.addEventListener("click", togglePreviewDirection);
 }
 
 async function loginWithPassword(password) {
@@ -827,9 +832,10 @@ function render() {
   dom.linkUrlInput.value = primaryLink?.url || "";
   dom.llmResultInput.value = draft.result || "";
   dom.llmResultInput.dir = "rtl";
-  dom.htmlOutput.value = draft.html || "";
+  const html = previewHtmlForDraft(draft);
+  dom.htmlOutput.value = html;
   dom.preview.dir = draft.direction || "auto";
-  dom.preview.innerHTML = draft.html || "<p></p>";
+  dom.preview.innerHTML = html || "<p></p>";
   renderStatus();
   renderSources();
 }
@@ -1266,6 +1272,7 @@ function clearHtmlForRegeneration(draft) {
 async function saveResultText() {
   const draft = activeDraft();
   draft.result = dom.llmResultInput.value;
+  updateHtml(false);
   if (draft.status === "exported") draft.status = "done";
   draft.processingError = "";
   touchDraft(draft);
@@ -1581,6 +1588,8 @@ function shouldUseRemoteResult(localDraft, remoteDraft) {
 function shouldUseRemoteHtml(localDraft, remoteDraft) {
   const remoteHtml = String(remoteDraft.html || "");
   if (!remoteHtml.trim()) return false;
+  if (remoteDraft.processedAt && remoteDraft.processedAt !== localDraft.processedAt) return true;
+  if (remoteDraft.htmlCreatedAt && remoteDraft.htmlCreatedAt !== localDraft.htmlCreatedAt) return true;
   if (remoteDraft.exportedAt && remoteDraft.exportedAt !== localDraft.exportedAt) return true;
   return !String(localDraft.html || "").trim();
 }
@@ -1603,14 +1612,15 @@ function isWorkspaceFormFieldFocused() {
 
 function renderSharedOutputFields() {
   const draft = activeDraft();
+  const html = previewHtmlForDraft(draft);
   syncFieldUnlessFocused(dom.draftTitleInput, draft.title || "");
   if (isDefaultPromptText(draft.prompt)) {
     syncFieldUnlessFocused(dom.promptOutput, buildPrompt());
   }
   syncFieldUnlessFocused(dom.llmResultInput, draft.result || "");
-  syncFieldUnlessFocused(dom.htmlOutput, draft.html || "");
+  syncFieldUnlessFocused(dom.htmlOutput, html);
   if (document.activeElement !== dom.htmlOutput) {
-    dom.preview.innerHTML = draft.html || "<p></p>";
+    dom.preview.innerHTML = html || "<p></p>";
   }
 }
 
@@ -1666,14 +1676,20 @@ function clearPersistentError() {
 
 function updateHtml(shouldSave = true) {
   const draft = activeDraft();
-  const html = makeCmsHtml(dom.llmResultInput.value || draft.result || "");
+  const html = makeCmsHtml(dom.llmResultInput.value || draft.result || draft.html || "");
   draft.html = html;
+  draft.htmlCreatedAt = html ? new Date().toISOString() : "";
   dom.htmlOutput.value = html;
   dom.preview.innerHTML = html || "<p></p>";
   if (shouldSave) {
     touchDraft(draft);
     saveStateSoon();
   }
+  return html;
+}
+
+function previewHtmlForDraft(draft) {
+  return makeCmsHtml(draft.html || draft.result || "");
 }
 
 function makeCmsHtml(input) {
@@ -1862,9 +1878,14 @@ function importedDraftCopy(draft) {
   return copy;
 }
 
-function downloadHtml() {
+async function downloadHtml() {
   const draft = activeDraft();
-  const html = dom.htmlOutput.value || "";
+  draft.result = dom.llmResultInput.value;
+  const html = updateHtml(false);
+  if (!html) {
+    showToast("Add result text first.");
+    return;
+  }
   const documentHtml = `<!doctype html>
 <html lang="en">
 <head>
@@ -1877,6 +1898,20 @@ ${html}
 </html>
 `;
   downloadBlob(documentHtml, `${slugify(draft.title)}.html`, "text/html");
+  draft.status = "exported";
+  draft.exportedAt = new Date().toISOString();
+  draft.processingError = "";
+  touchDraft(draft);
+  clearPersistentError();
+  renderStatus();
+  renderDraftNavigation();
+  await saveState();
+
+  await pushBackendSync({
+    busyMessage: "Saving export status...",
+    doneMessage: "HTML downloaded and item marked exported.",
+    toastMessage: "HTML downloaded and saved."
+  });
 }
 
 function downloadBlob(content, filename, type) {

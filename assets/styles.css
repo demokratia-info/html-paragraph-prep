@@ -670,6 +670,10 @@ textarea:focus {
   overflow: hidden;
 }
 
+.panel-output .preview-shell {
+  min-height: 0;
+}
+
 .error-box {
   border: 1px solid #f3b7ad;
   border-radius: var(--radius);
@@ -714,6 +718,10 @@ textarea:focus {
   overflow: auto;
   padding: 16px;
   background: #fff;
+}
+
+.panel-output .cms-preview {
+  min-height: 0;
 }
 
 .cms-preview h2,

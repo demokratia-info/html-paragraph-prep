@@ -201,9 +201,9 @@
             <span aria-hidden="true">✓</span>
             <span>Save Text</span>
           </button>
-          <button class="button secondary" id="refreshHtmlButton" type="button" title="Generate HTML">
-            <span aria-hidden="true">↻</span>
-            <span>Generate HTML</span>
+          <button class="button secondary" id="downloadHtmlButton" type="button">
+            <span aria-hidden="true">⇩</span>
+            <span>Download</span>
           </button>
           <button class="button secondary" id="copyResultButton" type="button">
             <span aria-hidden="true">⧉</span>
@@ -223,37 +223,20 @@
           <span class="visually-hidden">Result</span>
           <textarea id="llmResultInput" rows="11" dir="rtl" spellcheck="true"></textarea>
         </label>
+
+        <div class="visually-hidden" aria-hidden="true">
+          <textarea id="htmlOutput" spellcheck="false"></textarea>
+        </div>
       </section>
 
       <section class="panel panel-output" aria-labelledby="outputTitle">
         <div class="panel-heading">
           <div>
-            <h2 id="outputTitle">HTML</h2>
-            <p>CMS-ready output and preview</p>
+            <h2 id="outputTitle">Preview</h2>
           </div>
         </div>
-
-        <div class="button-row">
-          <button class="button primary" id="copyHtmlButton" type="button">
-            <span aria-hidden="true">⧉</span>
-            <span>Copy HTML</span>
-          </button>
-          <button class="button secondary" id="downloadHtmlButton" type="button">
-            <span aria-hidden="true">⇩</span>
-            <span>Download</span>
-          </button>
-        </div>
-
-        <label class="field grow">
-          <span>Generated HTML</span>
-          <textarea id="htmlOutput" rows="12" spellcheck="false"></textarea>
-        </label>
 
         <div class="preview-shell">
-          <div class="preview-toolbar">
-            <span>Preview</span>
-            <button class="icon-button" id="toggleDirectionButton" type="button" title="Toggle text direction" aria-label="Toggle text direction">↔</button>
-          </div>
           <article class="cms-preview" id="preview" dir="auto"></article>
         </div>
       </section>

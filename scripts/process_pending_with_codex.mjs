@@ -116,15 +116,19 @@ async function processDraft(state, draft) {
     runCodex(prompt, resultPath);
     const resultText = readResultText(resultPath);
     if (!resultText) throw new Error("Codex finished without returning summary text.");
+    const resultHtml = makeCmsHtml(resultText);
     const derivedTitle = deriveTitleFromSources(preparedSources);
 
     finalizeDraft(draft.id, runId, (freshDraft) => {
+      const processedAt = new Date().toISOString();
       freshDraft.result = resultText;
+      freshDraft.html = resultHtml;
+      freshDraft.htmlCreatedAt = resultHtml ? processedAt : "";
       if (shouldReplaceDraftTitle(freshDraft.title) && derivedTitle) {
         freshDraft.title = derivedTitle;
       }
       freshDraft.status = "done";
-      freshDraft.processedAt = new Date().toISOString();
+      freshDraft.processedAt = processedAt;
       freshDraft.processingStartedAt = "";
       freshDraft.processingRunId = "";
       freshDraft.processingError = "";
@@ -562,6 +566,100 @@ function isUsefulExtractedText(text) {
   const value = String(text || "");
   const wordChars = (value.match(/[\p{L}\p{N}]/gu) || []).length;
   return value.length >= 80 && wordChars >= 40;
+}
+
+function makeCmsHtml(input) {
+  const cleaned = stripMarkdownFence(input).trim();
+  if (!cleaned) return "";
+  if (looksLikeHtml(cleaned)) return sanitizeGeneratedHtml(cleaned);
+  return markdownishToHtml(cleaned);
+}
+
+function stripMarkdownFence(value) {
+  return String(value || "").replace(/^```(?:html)?\s*/i, "").replace(/\s*```$/i, "");
+}
+
+function looksLikeHtml(value) {
+  return /<(p|h[1-6]|ul|ol|li|blockquote|strong|em|a|br)\b/i.test(value);
+}
+
+function sanitizeGeneratedHtml(html) {
+  return String(html || "")
+    .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, "")
+    .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, "")
+    .replace(/\s+on[a-z]+\s*=\s*"[^"]*"/gi, "")
+    .replace(/\s+on[a-z]+\s*=\s*'[^']*'/gi, "")
+    .replace(/\s+on[a-z]+\s*=\s*[^\s>]+/gi, "")
+    .replace(/\s+href\s*=\s*(['"])\s*javascript:[\s\S]*?\1/gi, "")
+    .trim();
+}
+
+function markdownishToHtml(text) {
+  const blocks = String(text || "").split(/\n{2,}/).map((block) => block.trim()).filter(Boolean);
+  const html = [];
+
+  for (const block of blocks) {
+    const lines = block.split(/\n/).map((line) => line.trim()).filter(Boolean);
+    if (!lines.length) continue;
+
+    if (/^#{1,6}\s+/.test(lines[0])) {
+      const rawLevel = (lines[0].match(/^#+/) || ["##"])[0].length;
+      const tag = rawLevel <= 2 ? "h2" : "h3";
+      html.push(`<${tag}>${formatInline(lines[0].replace(/^#{1,6}\s+/, ""))}</${tag}>`);
+      continue;
+    }
+
+    if (lines.every((line) => /^[-*]\s+/.test(line))) {
+      const items = lines.map((line) => `<li>${formatInline(line.replace(/^[-*]\s+/, ""))}</li>`).join("");
+      html.push(`<ul>${items}</ul>`);
+      continue;
+    }
+
+    if (lines.every((line) => /^\d+[.)]\s+/.test(line))) {
+      const items = lines.map((line) => `<li>${formatInline(line.replace(/^\d+[.)]\s+/, ""))}</li>`).join("");
+      html.push(`<ol>${items}</ol>`);
+      continue;
+    }
+
+    if (lines.every((line) => /^>\s?/.test(line))) {
+      const quote = lines.map((line) => line.replace(/^>\s?/, "")).join(" ");
+      html.push(`<blockquote>${formatInline(quote)}</blockquote>`);
+      continue;
+    }
+
+    html.push(`<p>${formatInline(lines.join(" "))}</p>`);
+  }
+
+  return html.join("\n");
+}
+
+function formatInline(value) {
+  let escaped = escapeHtml(value);
+  escaped = escaped.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (match, label, url) => {
+    const href = sanitizeHref(url.replace(/&amp;/g, "&"));
+    return href ? `<a href="${escapeAttribute(href)}">${label}</a>` : label;
+  });
+  escaped = escaped.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+  escaped = escaped.replace(/\*([^*]+)\*/g, "<em>$1</em>");
+  return escaped;
+}
+
+function sanitizeHref(href) {
+  const trimmed = String(href || "").trim();
+  if (!trimmed) return "";
+  if (/^(https?:|mailto:|tel:|#|\/)/i.test(trimmed)) return trimmed;
+  return "";
+}
+
+function escapeHtml(value) {
+  return String(value || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+function escapeAttribute(value) {
+  return escapeHtml(value).replace(/"/g, "&quot;");
 }
 
 function defaultPromptFromDraft(draft) {
