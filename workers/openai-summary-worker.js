@@ -7,6 +7,7 @@ const DEFAULT_BRANCH = "main";
 const DEFAULT_BASE_PATH = "summary-html-desk";
 const DEFAULT_REASONING_EFFORT = "xhigh";
 const DEFAULT_PROMPT_FILENAME = "default-prompt.txt";
+const MAX_DEFAULT_PROMPT_CHARS = 50000;
 const MAX_TEXT_SOURCE_CHARS = 120000;
 const MAX_FILE_DATA_CHARS = 28 * 1024 * 1024;
 
@@ -37,6 +38,8 @@ export default {
           return json(await loadSharedState(env), 200, corsHeaders);
         case "loadDefaultPrompt":
           return json(await loadDefaultPrompt(env), 200, corsHeaders);
+        case "saveDefaultPrompt":
+          return json(await saveDefaultPrompt(payload, env), 200, corsHeaders);
         case "getSourceFile":
           return json(await getSourceFile(payload, env), 200, corsHeaders);
         case "checkStorage":
@@ -208,6 +211,28 @@ async function loadDefaultPrompt(env) {
   return {
     prompt: base64ToUtf8(item.content).trim(),
     updatedAt: item.committer?.date || null
+  };
+}
+
+async function saveDefaultPrompt(payload, env) {
+  const prompt = String(payload.prompt || "").trim();
+  if (!prompt) throw httpError("Default prompt cannot be empty.", 400);
+  if (prompt.length > MAX_DEFAULT_PROMPT_CHARS) {
+    throw httpError(`Default prompt is too long. Keep it under ${MAX_DEFAULT_PROMPT_CHARS} characters.`, 400);
+  }
+
+  const config = githubConfig(env);
+  const updatedAt = new Date().toISOString();
+  await githubPutContent(
+    config,
+    defaultPromptPath(config),
+    utf8ToBase64(`${prompt}\n`),
+    "Update default summary prompt"
+  );
+  return {
+    ok: true,
+    prompt,
+    updatedAt
   };
 }
 

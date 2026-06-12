@@ -156,11 +156,15 @@
             <span aria-hidden="true">↻</span>
             <span>Default Prompt</span>
           </button>
+          <button class="button secondary" id="saveDefaultPromptButton" type="button">
+            <span aria-hidden="true">✓</span>
+            <span>Save as Default</span>
+          </button>
         </div>
 
         <label class="field prompt-field">
           <span>Prompt for Codex</span>
-          <textarea id="promptOutput" rows="7" dir="rtl" spellcheck="false"></textarea>
+          <textarea id="promptOutput" rows="12" dir="rtl" spellcheck="false"></textarea>
         </label>
 
         <button class="button primary full" id="pushBackendButton" type="button">
@@ -254,6 +258,16 @@
         </div>
       </section>
     </main>
+
+    <dialog class="confirm-dialog" id="defaultPromptDialog" aria-labelledby="defaultPromptDialogTitle">
+      <form method="dialog">
+        <h2 id="defaultPromptDialogTitle">Do you really want to overwrite the default prompt?</h2>
+        <div class="button-row dialog-actions">
+          <button class="button secondary" value="no" autofocus>No</button>
+          <button class="button primary" value="yes">Yes</button>
+        </div>
+      </form>
+    </dialog>
 
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
     <script src="./assets/app.js" defer></script>

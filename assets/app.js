@@ -111,7 +111,9 @@ const dom = {
   fileSourceInput: $("#fileSourceInput"),
   sourceList: $("#sourceList"),
   buildPromptButton: $("#buildPromptButton"),
+  saveDefaultPromptButton: $("#saveDefaultPromptButton"),
   promptOutput: $("#promptOutput"),
+  defaultPromptDialog: $("#defaultPromptDialog"),
   errorBox: $("#errorBox"),
   errorText: $("#errorText"),
   clearErrorButton: $("#clearErrorButton"),
@@ -446,6 +448,7 @@ function bindEvents() {
     saveStateSoon();
     showToast("Default prompt added.");
   });
+  dom.saveDefaultPromptButton.addEventListener("click", saveCurrentPromptAsDefault);
   dom.promptOutput.addEventListener("input", () => {
     const draft = activeDraft();
     draft.prompt = dom.promptOutput.value;
@@ -1142,6 +1145,70 @@ async function loadDefaultPrompt(options = {}) {
     console.warn("Default prompt load failed", error);
     return false;
   }
+}
+
+async function saveCurrentPromptAsDefault() {
+  const prompt = dom.promptOutput.value.trim();
+  if (!prompt) {
+    showToast("Add prompt text first.");
+    return;
+  }
+
+  const confirmed = await confirmDefaultPromptOverwrite();
+  if (!confirmed) return;
+
+  const label = dom.saveDefaultPromptButton.querySelector("span:last-child");
+  dom.saveDefaultPromptButton.disabled = true;
+  label.textContent = "Saving";
+
+  try {
+    const payload = await backendPost({
+      action: "saveDefaultPrompt",
+      prompt
+    });
+    rememberDefaultPrompt(payload.prompt || prompt);
+    const draft = activeDraft();
+    draft.prompt = prompt;
+    touchDraft(draft);
+    await saveState();
+    setSyncStatus("Default prompt saved.");
+    showToast("Default prompt saved.");
+  } catch (error) {
+    const message = error.message || "Could not save default prompt.";
+    setSyncStatus(message);
+    showToast(message);
+  } finally {
+    dom.saveDefaultPromptButton.disabled = false;
+    label.textContent = "Save as Default";
+  }
+}
+
+function confirmDefaultPromptOverwrite() {
+  if (!dom.defaultPromptDialog || typeof dom.defaultPromptDialog.showModal !== "function") {
+    return Promise.resolve(window.confirm("Do you really want to overwrite the default prompt?"));
+  }
+
+  return new Promise((resolve) => {
+    const dialog = dom.defaultPromptDialog;
+    const onClose = () => {
+      cleanup();
+      resolve(dialog.returnValue === "yes");
+    };
+    const onCancel = (event) => {
+      event.preventDefault();
+      dialog.close("no");
+    };
+    const cleanup = () => {
+      dialog.removeEventListener("close", onClose);
+      dialog.removeEventListener("cancel", onCancel);
+    };
+
+    if (dialog.open) dialog.close("no");
+    dialog.returnValue = "no";
+    dialog.addEventListener("close", onClose);
+    dialog.addEventListener("cancel", onCancel);
+    dialog.showModal();
+  });
 }
 
 async function saveForProcessing() {
