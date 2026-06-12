@@ -419,7 +419,9 @@ textarea:focus {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  max-height: 320px;
+  flex: 1;
+  min-height: 0;
+  max-height: none;
   overflow: auto;
   padding-right: 2px;
 }
@@ -475,10 +477,6 @@ textarea:focus {
   font-size: 12px;
   line-height: 1.35;
   overflow-wrap: anywhere;
-}
-
-.draft-card-snippet {
-  color: #2d3b45;
 }
 
 .source-item {

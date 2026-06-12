@@ -1,6 +1,6 @@
 "use strict";
 
-const CACHE_NAME = "summary-html-desk-v23";
+const CACHE_NAME = "summary-html-desk-v24";
 const ASSETS = [
   "./",
   "./index.html",

@@ -937,11 +937,7 @@ function renderDraftBrowser() {
       sources.className = "draft-card-sources";
       sources.textContent = draftSourcePreview(draft);
 
-      const snippet = document.createElement("p");
-      snippet.className = "draft-card-snippet";
-      snippet.textContent = draftSnippet(draft);
-
-      button.append(top, meta, sources, snippet);
+      button.append(top, meta, sources);
       return button;
     })
   );
@@ -996,12 +992,6 @@ function draftSourcePreview(draft) {
   const names = draft.sources.slice(0, 3).map((source) => source.title || source.filename || source.url || "Source");
   const extra = draft.sources.length > names.length ? ` +${draft.sources.length - names.length} more` : "";
   return `Sources: ${names.join(", ")}${extra}`;
-}
-
-function draftSnippet(draft) {
-  const text = normalizeWhitespace(draft.result || draft.sources.map((source) => source.text).filter(Boolean).join(" "));
-  if (!text) return "No text yet";
-  return text.length > 150 ? `${text.slice(0, 147)}...` : text;
 }
 
 function renderSources() {
