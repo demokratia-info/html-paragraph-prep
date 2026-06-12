@@ -364,7 +364,7 @@ textarea:focus {
 
 .drop-zone {
   display: grid;
-  min-height: 128px;
+  min-height: 102px;
   place-items: center;
   gap: 8px;
   border: 1px dashed var(--line-strong);
