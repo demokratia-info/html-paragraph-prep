@@ -83,14 +83,28 @@ function syncDefaultPrompt() {
   log("Default prompt updated in shared storage.");
 }
 
+function loadRequiredDefaultPrompt() {
+  const item = githubGetContent(DEFAULT_PROMPT_PATH);
+  const prompt = item?.content
+    ? Buffer.from(stripBase64Whitespace(item.content), "base64").toString("utf8").trim()
+    : "";
+  if (!prompt) {
+    throw new Error(`Default prompt is missing or empty in ${DATA_REPO}/${DEFAULT_PROMPT_PATH}.`);
+  }
+  return prompt;
+}
+
 async function processDraft(state, draft) {
   const runId = `${Date.now()}-${process.pid}-${safePathPart(draft.id)}`;
   const now = new Date().toISOString();
+  const defaultPrompt = loadRequiredDefaultPrompt();
   const draftInState = state.drafts.find((item) => item.id === draft.id);
   draftInState.status = "processing";
   draftInState.processingStartedAt = now;
   draftInState.processingRunId = runId;
   draftInState.processingError = "";
+  draftInState.prompt = defaultPrompt;
+  draftInState.promptSource = DEFAULT_PROMPT_PATH;
   saveSharedState(state, `Start processing ${draft.title || draft.id}`);
 
   const workDir = path.join(PROCESSING_ROOT, safePathPart(draft.id), runId);
@@ -108,7 +122,7 @@ async function processDraft(state, draft) {
         `File: ${unreadableFiles.map((source) => source.filename || source.title || "source file").join(", ")}`
       ].join(" "));
     }
-    const prompt = buildCodexPrompt(draftInState, preparedSources);
+    const prompt = buildCodexPrompt(draftInState, preparedSources, defaultPrompt);
     const promptPath = path.join(workDir, "prompt.txt");
     const resultPath = path.join(workDir, "result.txt");
     fs.writeFileSync(promptPath, prompt, "utf8");
@@ -360,14 +374,15 @@ function runCodex(prompt, resultPath) {
   }
 }
 
-function buildCodexPrompt(draft, sources) {
-  const savedPrompt = String(draft.prompt || "").trim() || defaultPromptFromDraft(draft);
+function buildCodexPrompt(draft, sources, defaultPrompt) {
+  const savedPrompt = String(defaultPrompt || "").trim();
+  if (!savedPrompt) throw new Error("Default prompt is missing.");
   const previousResult = String(draft.regenerationBaseResult || draft.result || "").trim();
   const previousInstruction = previousResult
     ? [
       "This item already has a previous result.",
       "Treat the previous result as the base text.",
-      "Keep it as similar as possible and only change what is needed to satisfy the latest saved prompt and source material.",
+      "Keep it as similar as possible and only change what is needed to satisfy the current default prompt and source material.",
       "",
       "Previous result:",
       previousResult
@@ -383,7 +398,7 @@ function buildCodexPrompt(draft, sources) {
     "",
     `Item title: ${draft.title || "Untitled summary"}`,
     "",
-    "Latest saved prompt:",
+    "Current default prompt from the private shared system:",
     savedPrompt,
     "",
     previousInstruction,
