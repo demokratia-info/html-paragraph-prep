@@ -4,7 +4,7 @@ const STORAGE_KEY = "summary-html-desk.drafts.v1";
 const SETTINGS_KEY = "summary-html-desk.settings.v1";
 const DB_NAME = "summary-html-desk";
 const DB_VERSION = 1;
-const APP_VERSION = "20260613-4";
+const APP_VERSION = "20260613-5";
 const DEFAULT_BACKEND_ENDPOINT = "https://summary-html-desk-openai.demokratia-info.workers.dev";
 const PASSWORD_SESSION_KEY = "summary-html-desk.editor-password.session";
 const PASSWORD_STORAGE_KEY = "summary-html-desk.editor-password.local";
@@ -470,7 +470,7 @@ function bindEvents() {
   dom.saveDefaultPromptButton.addEventListener("click", saveCurrentPromptAsDefault);
   dom.promptOutput.addEventListener("input", () => {
     const draft = activeDraft();
-    draft.prompt = dom.promptOutput.value;
+    draft.prompt = promptForStorage(dom.promptOutput.value);
     touchDraft(draft);
     renderStatus();
     saveStateSoon();
@@ -1171,8 +1171,8 @@ function sourceMeta(source) {
 
 function updatePrompt() {
   const draft = activeDraft();
-  draft.prompt = buildPrompt();
-  dom.promptOutput.value = draft.prompt;
+  draft.prompt = "";
+  dom.promptOutput.value = buildPrompt();
   touchDraft(draft);
 }
 
@@ -1182,6 +1182,11 @@ function buildPrompt() {
 
 function promptTextForDisplay(prompt) {
   return isDefaultPromptText(prompt) ? buildPrompt() : prompt;
+}
+
+function promptForStorage(prompt) {
+  const value = String(prompt || "").trim();
+  return isDefaultPromptText(value) ? "" : value;
 }
 
 function isDefaultPromptText(prompt) {
@@ -1232,7 +1237,8 @@ async function saveCurrentPromptAsDefault() {
     });
     rememberDefaultPrompt(payload.prompt || prompt);
     const draft = activeDraft();
-    draft.prompt = prompt;
+    draft.prompt = "";
+    dom.promptOutput.value = buildPrompt();
     touchDraft(draft);
     await saveState();
     setSyncStatus("Default prompt saved.");
@@ -1285,8 +1291,8 @@ async function saveForProcessing() {
   }
 
   const editedPrompt = dom.promptOutput.value.trim();
-  draft.prompt = isDefaultPromptText(draft.prompt) ? buildPrompt() : editedPrompt || buildPrompt();
-  dom.promptOutput.value = draft.prompt;
+  draft.prompt = promptForStorage(editedPrompt);
+  dom.promptOutput.value = promptTextForDisplay(draft.prompt);
   const clearStaleHtml = shouldClearHtmlForProcessing(draft);
   setResultFromEditor(draft);
   if (clearStaleHtml) {
@@ -1446,7 +1452,7 @@ async function runProxySummary() {
       action: "summarize",
       title: draft.title,
       options: DEFAULT_SUMMARY_OPTIONS,
-      prompt: draft.prompt,
+      prompt: promptTextForDisplay(draft.prompt),
       sources: await Promise.all(draft.sources.map(sourceForProxy))
     });
 

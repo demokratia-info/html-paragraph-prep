@@ -100,7 +100,7 @@ async function processDraft(state, draft) {
   draftInState.processingStartedAt = now;
   draftInState.processingRunId = runId;
   draftInState.processingError = "";
-  draftInState.prompt = defaultPrompt;
+  draftInState.prompt = "";
   draftInState.promptSource = DEFAULT_PROMPT_PATH;
   saveSharedState(state, `Start processing ${draft.title || draft.id}`);
 

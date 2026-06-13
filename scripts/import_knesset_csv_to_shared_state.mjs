@@ -32,7 +32,6 @@ function main() {
   });
   if (!rows.length) throw new Error(`No accepted rows found in ${options.csv}`);
 
-  const prompt = loadDefaultPrompt();
   const state = loadSharedState() || {
     version: 1,
     app: "summary-html-desk",
@@ -54,7 +53,7 @@ function main() {
       return;
     }
 
-    const draft = createDraftFromRow(row, prompt, new Date(now.getTime() + index * 1000).toISOString());
+    const draft = createDraftFromRow(row, new Date(now.getTime() + index * 1000).toISOString());
     imported.push(draft);
     state.drafts.push(draft);
     seen.urls.add(url);
@@ -106,7 +105,7 @@ Options:
 `);
 }
 
-function createDraftFromRow(row, prompt, timestamp) {
+function createDraftFromRow(row, timestamp) {
   const documentId = String(row.document_bill_id || urlBasename(row.url).replace(/\D/g, "") || Date.now());
   const url = normalizeUrl(row.url);
   const filename = urlBasename(url);
@@ -138,7 +137,8 @@ function createDraftFromRow(row, prompt, timestamp) {
     paragraphCount: 3,
     tone: "neutral",
     includeLinks: true,
-    prompt,
+    prompt: "",
+    promptSource: DEFAULT_PROMPT_PATH,
     result: "",
     regenerationBaseResult: "",
     html: "",
@@ -183,10 +183,6 @@ function existingSourceKeys(drafts) {
     }
   }
   return { urls, basenames };
-}
-
-function loadDefaultPrompt() {
-  return String(githubGetTextContent(DEFAULT_PROMPT_PATH) || "").trim();
 }
 
 function loadSharedState() {
