@@ -4,8 +4,8 @@ const STORAGE_KEY = "summary-html-desk.drafts.v1";
 const SETTINGS_KEY = "summary-html-desk.settings.v1";
 const DB_NAME = "summary-html-desk";
 const DB_VERSION = 1;
-const APP_VERSION = "20260614-1";
-const DEFAULT_BACKEND_ENDPOINT = "https://tin-startup-strongly-obtaining.trycloudflare.com";
+const APP_VERSION = "20260614-2";
+const DEFAULT_BACKEND_ENDPOINT = "https://chances-directly-copy-invite.trycloudflare.com";
 const PASSWORD_SESSION_KEY = "summary-html-desk.editor-password.session";
 const PASSWORD_STORAGE_KEY = "summary-html-desk.editor-password.local";
 const MAX_BINARY_FILE_BYTES = 18 * 1024 * 1024;
@@ -507,7 +507,7 @@ function bindEvents() {
 }
 
 async function loginWithPassword(password) {
-  const value = String(password || "").trim();
+  const value = normalizeEditorPassword(password);
   if (!value) {
     showLoginError("Enter the editor password.");
     return;
@@ -518,6 +518,7 @@ async function loginWithPassword(password) {
   hideLoginError();
   state.editorPassword = value;
   dom.editorPasswordInput.value = value;
+  dom.loginPasswordInput.value = value;
 
   const loaded = await pullBackendSync({ skipConfirm: true, quiet: true });
   dom.loginButton.disabled = false;
@@ -590,24 +591,36 @@ function logout() {
 }
 
 function rememberEditorPassword(value) {
-  state.editorPassword = value;
-  sessionStorage.setItem(PASSWORD_SESSION_KEY, value);
+  const normalized = normalizeEditorPassword(value);
+  state.editorPassword = normalized;
+  sessionStorage.setItem(PASSWORD_SESSION_KEY, normalized);
   try {
-    localStorage.setItem(PASSWORD_STORAGE_KEY, value);
+    localStorage.setItem(PASSWORD_STORAGE_KEY, normalized);
   } catch (error) {
     console.warn("Could not persist editor password", error);
   }
 }
 
 function savedEditorPassword() {
-  if (state.editorPassword) return state.editorPassword;
+  if (state.editorPassword) return normalizeEditorPassword(state.editorPassword);
   try {
     const persisted = localStorage.getItem(PASSWORD_STORAGE_KEY);
-    if (persisted) return persisted;
+    if (persisted) return normalizeEditorPassword(persisted);
   } catch (error) {
     console.warn("Could not read persisted editor password", error);
   }
-  return sessionStorage.getItem(PASSWORD_SESSION_KEY) || "";
+  return normalizeEditorPassword(sessionStorage.getItem(PASSWORD_SESSION_KEY) || "");
+}
+
+function normalizeEditorPassword(value) {
+  let text = String(value || "").trim();
+  if (/^EDITOR_PASSWORD\s*=/i.test(text)) {
+    text = text.replace(/^EDITOR_PASSWORD\s*=/i, "").trim();
+  }
+  if ((text.startsWith('"') && text.endsWith('"')) || (text.startsWith("'") && text.endsWith("'"))) {
+    text = text.slice(1, -1).trim();
+  }
+  return text;
 }
 
 function forgetEditorPassword() {
@@ -1506,7 +1519,7 @@ function backendEndpoint() {
 }
 
 function editorPassword() {
-  return savedEditorPassword() || dom.editorPasswordInput.value;
+  return normalizeEditorPassword(savedEditorPassword() || dom.editorPasswordInput.value);
 }
 
 async function backendPost(payload) {

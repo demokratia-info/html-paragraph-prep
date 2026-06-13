@@ -124,7 +124,7 @@ function allowedOrigins() {
 }
 
 async function requireEditorPassword(request) {
-  const supplied = String(request.headers["x-editor-password"] || request.body?.editorPassword || "");
+  const supplied = normalizeEditorPassword(request.headers["x-editor-password"] || request.body?.editorPassword || "");
   const plain = process.env.EDITOR_PASSWORD || "";
   const hash = String(process.env.EDITOR_PASSWORD_SHA256 || "").trim().toLowerCase();
 
@@ -137,6 +137,17 @@ async function requireEditorPassword(request) {
     ? safeEqual(sha256Hex(supplied), hash)
     : safeEqual(supplied, plain);
   if (!valid) throw httpError("Invalid editor password.", 401);
+}
+
+function normalizeEditorPassword(value) {
+  let text = String(value || "").trim();
+  if (/^EDITOR_PASSWORD\s*=/i.test(text)) {
+    text = text.replace(/^EDITOR_PASSWORD\s*=/i, "").trim();
+  }
+  if ((text.startsWith('"') && text.endsWith('"')) || (text.startsWith("'") && text.endsWith("'"))) {
+    text = text.slice(1, -1).trim();
+  }
+  return text;
 }
 
 function sha256Hex(value) {
