@@ -37,14 +37,21 @@ Drafts are cached in the browser profile for local work, then shared through the
 
 ## Local PostgreSQL API
 
-PostgreSQL should be running locally with the `html_paragraph_prep` database. Start the API before using the GitHub Pages app:
+PostgreSQL should be running locally with the `html_paragraph_prep` database. The API normally runs as a systemd service on this server:
 
 ```bash
-cd /home/talraviv/html-paragraph-prep
-npm run server
+sudo systemctl status summary-html-desk-api.service
 ```
 
-The GitHub Pages frontend is configured to call `http://127.0.0.1:8787`. This works for local use on this machine. For other users, expose the API through a secure HTTPS tunnel or deploy the API to a reachable server; do not expose PostgreSQL directly.
+The GitHub Pages frontend is configured to call the public Cloudflare Tunnel endpoint, which forwards to `http://127.0.0.1:8787` on this server. Editors never connect to PostgreSQL directly.
+
+The current tunnel service is:
+
+```bash
+sudo systemctl status summary-html-desk-tunnel.service
+```
+
+The account-less `trycloudflare.com` tunnel is suitable for immediate testing, but it is not a permanent production hostname. For stable multi-user use, replace it with a named Cloudflare Tunnel or another stable HTTPS API endpoint, then update `DEFAULT_BACKEND_ENDPOINT` in `assets/app.js`.
 
 Initialize or check the SQL schema:
 
