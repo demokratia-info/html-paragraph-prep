@@ -57,7 +57,7 @@ async function main() {
       return;
     }
 
-    await processDraft(state, draft);
+    await processDraft(draft);
     processed += 1;
   }
 
@@ -91,18 +91,11 @@ function loadRequiredDefaultPrompt() {
   return prompt;
 }
 
-async function processDraft(state, draft) {
+async function processDraft(draft) {
   const runId = `${Date.now()}-${process.pid}-${safePathPart(draft.id)}`;
   const now = new Date().toISOString();
   const defaultPrompt = loadRequiredDefaultPrompt();
-  const draftInState = state.drafts.find((item) => item.id === draft.id);
-  draftInState.status = "processing";
-  draftInState.processingStartedAt = now;
-  draftInState.processingRunId = runId;
-  draftInState.processingError = "";
-  draftInState.prompt = "";
-  draftInState.promptSource = DEFAULT_PROMPT_PATH;
-  saveSharedState(state, `Start processing ${draft.title || draft.id}`);
+  const draftInState = markDraftProcessing(draft, runId, now);
 
   const workDir = path.join(PROCESSING_ROOT, safePathPart(draft.id), runId);
   ensureDir(workDir);
@@ -159,6 +152,17 @@ async function processDraft(state, draft) {
     }, `Processing failed ${draft.title || draft.id}`);
     log(`Failed: ${draft.title || draft.id}: ${message}`);
   }
+}
+
+function markDraftProcessing(draft, runId, startedAt) {
+  return updateSharedDraftWithRetry(draft.id, (freshDraft) => {
+    freshDraft.status = "processing";
+    freshDraft.processingStartedAt = startedAt;
+    freshDraft.processingRunId = runId;
+    freshDraft.processingError = "";
+    freshDraft.prompt = "";
+    freshDraft.promptSource = DEFAULT_PROMPT_PATH;
+  }, `Start processing ${draft.title || draft.id}`);
 }
 
 function prepareSources(draft, workDir) {
@@ -744,16 +748,50 @@ function findNextPendingDraft(drafts) {
 }
 
 function finalizeDraft(draftId, runId, updateDraft, message) {
-  const freshState = loadSharedState();
-  if (!freshState) throw new Error("Shared work list disappeared while processing.");
-  const freshDraft = freshState.drafts.find((item) => item.id === draftId);
-  if (!freshDraft) throw new Error("Item disappeared while processing.");
-  if (freshDraft.processingRunId && freshDraft.processingRunId !== runId) {
-    log(`Skipping stale processing result for ${draftId}.`);
-    return;
+  for (let attempt = 1; attempt <= 4; attempt += 1) {
+    const freshState = loadSharedState();
+    if (!freshState) throw new Error("Shared work list disappeared while processing.");
+    const freshDraft = freshState.drafts.find((item) => item.id === draftId);
+    if (!freshDraft) throw new Error("Item disappeared while processing.");
+    if (freshDraft.processingRunId && freshDraft.processingRunId !== runId) {
+      log(`Skipping stale processing result for ${draftId}.`);
+      return;
+    }
+    updateDraft(freshDraft);
+
+    try {
+      saveSharedState(freshState, message);
+      return;
+    } catch (error) {
+      if (attempt < 4 && isGithubConflict(error)) {
+        sleep(500 * attempt);
+        continue;
+      }
+      throw error;
+    }
   }
-  updateDraft(freshDraft);
-  saveSharedState(freshState, message);
+}
+
+function updateSharedDraftWithRetry(draftId, updateDraft, message) {
+  for (let attempt = 1; attempt <= 4; attempt += 1) {
+    const freshState = loadSharedState();
+    if (!freshState) throw new Error("Shared work list disappeared while processing.");
+    const freshDraft = freshState.drafts.find((item) => item.id === draftId);
+    if (!freshDraft) throw new Error("Item disappeared while processing.");
+    updateDraft(freshDraft);
+
+    try {
+      saveSharedState(freshState, message);
+      return freshDraft;
+    } catch (error) {
+      if (attempt < 4 && isGithubConflict(error)) {
+        sleep(500 * attempt);
+        continue;
+      }
+      throw error;
+    }
+  }
+  throw new Error("Could not update shared draft after repeated GitHub conflicts.");
 }
 
 function loadSharedState() {
@@ -828,6 +866,14 @@ function runGh(args, options = {}) {
     throw new Error(stderr.trim() || `gh api exited with status ${result.status}`);
   }
   return result.stdout;
+}
+
+function isGithubConflict(error) {
+  return /HTTP 409|expected [a-f0-9]{40}/i.test(error?.message || String(error));
+}
+
+function sleep(ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
 
 function commandPath(command) {
