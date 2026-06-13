@@ -8,7 +8,7 @@
     <meta name="description" content="A private GitHub Pages workspace for turning source material into CMS-ready HTML summaries.">
     <link rel="manifest" href="./manifest.webmanifest">
     <link rel="icon" href="./assets/favicon.svg" type="image/svg+xml">
-    <link rel="stylesheet" href="./assets/styles.css?v=20260614-4">
+    <link rel="stylesheet" href="./assets/styles.css?v=20260614-5">
   </head>
   <body>
     <section class="login-screen" id="loginScreen" aria-labelledby="loginTitle" hidden>
@@ -16,10 +16,14 @@
         <img class="brand-mark" src="./assets/favicon.svg" width="44" height="44" alt="">
         <div>
           <h1 id="loginTitle">Summary HTML Desk</h1>
-          <p>Enter the editor password to open the shared workspace.</p>
+          <p>Sign in to open your workspace.</p>
         </div>
         <label class="field">
-          <span>Editor password</span>
+          <span>Username</span>
+          <input id="loginUsernameInput" type="text" autocomplete="username" autocapitalize="none" spellcheck="false">
+        </label>
+        <label class="field">
+          <span>Password</span>
           <input id="loginPasswordInput" type="password" autocomplete="current-password" spellcheck="false">
         </label>
         <button class="button primary full" id="loginButton" type="submit">
@@ -39,6 +43,10 @@
         </div>
       </div>
       <div class="top-actions" aria-label="Draft actions">
+        <button class="button secondary" id="manageUsersButton" type="button" hidden>
+          <span aria-hidden="true">☷</span>
+          <span>Users</span>
+        </button>
         <button class="button secondary" id="pullBackendButton" type="button">
           <span aria-hidden="true">⇣</span>
           <span>Refresh</span>
@@ -94,6 +102,11 @@
             <option value="error">Needs attention</option>
             <option value="exported">Exported</option>
           </select>
+        </label>
+
+        <label class="field" id="ownerFilterField" hidden>
+          <span>User</span>
+          <select id="ownerFilterInput"></select>
         </label>
 
         <div class="draft-browser" id="draftBrowser" aria-live="polite"></div>
@@ -173,7 +186,6 @@
         </button>
 
         <div class="visually-hidden" aria-hidden="true">
-          <input id="editorPasswordInput" type="password" autocomplete="current-password" spellcheck="false">
           <input id="backendEndpointInput" type="url" inputmode="url" autocomplete="off" spellcheck="false">
           <button id="saveBackendButton" type="button">Save Endpoint</button>
           <p id="syncStatus">Shared work loaded.</p>
@@ -257,7 +269,41 @@
       </form>
     </dialog>
 
+    <dialog class="management-dialog" id="userManagementDialog" aria-labelledby="userManagementTitle">
+      <form class="management-screen" method="dialog">
+        <div class="management-header">
+          <div>
+            <h2 id="userManagementTitle">Users</h2>
+            <p>Admin workspace access</p>
+          </div>
+          <button class="icon-button" id="closeUserManagementButton" type="button" title="Close" aria-label="Close">×</button>
+        </div>
+
+        <div class="management-form">
+          <label class="field">
+            <span>Username</span>
+            <input id="newUsernameInput" type="text" autocomplete="off" autocapitalize="none" spellcheck="false">
+          </label>
+          <label class="field">
+            <span>Password</span>
+            <input id="newUserPasswordInput" type="password" autocomplete="new-password" spellcheck="false">
+          </label>
+          <label class="check-row management-check">
+            <input id="newUserAdminInput" type="checkbox">
+            <span>Admin</span>
+          </label>
+          <button class="button primary" id="addUserButton" type="button">
+            <span aria-hidden="true">+</span>
+            <span>Add User</span>
+          </button>
+        </div>
+
+        <div class="user-management-list" id="userManagementList" aria-live="polite"></div>
+        <p class="management-status" id="userManagementStatus" role="status"></p>
+      </form>
+    </dialog>
+
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
-    <script src="./assets/app.js?v=20260614-4" defer></script>
+    <script src="./assets/app.js?v=20260614-5" defer></script>
   </body>
 </html>

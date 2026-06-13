@@ -4,10 +4,13 @@ const STORAGE_KEY = "summary-html-desk.drafts.v1";
 const SETTINGS_KEY = "summary-html-desk.settings.v1";
 const DB_NAME = "summary-html-desk";
 const DB_VERSION = 1;
-const APP_VERSION = "20260614-4";
+const APP_VERSION = "20260614-5";
 const DEFAULT_BACKEND_ENDPOINT = "https://summary-api.demokratia.trade";
-const PASSWORD_SESSION_KEY = "summary-html-desk.editor-password.session";
-const PASSWORD_STORAGE_KEY = "summary-html-desk.editor-password.local";
+const SESSION_TOKEN_SESSION_KEY = "summary-html-desk.session-token.session";
+const SESSION_TOKEN_STORAGE_KEY = "summary-html-desk.session-token.local";
+const USERNAME_STORAGE_KEY = "summary-html-desk.username.local";
+const OLD_PASSWORD_SESSION_KEY = "summary-html-desk.editor-password.session";
+const OLD_PASSWORD_STORAGE_KEY = "summary-html-desk.editor-password.local";
 const MAX_BINARY_FILE_BYTES = 18 * 1024 * 1024;
 const SHARED_REFRESH_INTERVAL_MS = 60 * 1000;
 const DEFAULT_DRAFT_TITLE = "מקור חדש";
@@ -58,8 +61,11 @@ const state = {
   remoteDraftIds: new Set(),
   draftSearch: "",
   draftStatusFilter: "all",
+  adminUserFilter: "all",
   activeSourceTab: "link",
-  editorPassword: "",
+  sessionToken: "",
+  currentUser: null,
+  users: [],
   authenticated: false,
   saveTimer: null,
   autoRefreshTimer: null,
@@ -74,19 +80,22 @@ const $$ = (selector) => Array.from(document.querySelectorAll(selector));
 const dom = {
   loginScreen: $("#loginScreen"),
   loginForm: $("#loginForm"),
+  loginUsernameInput: $("#loginUsernameInput"),
   loginPasswordInput: $("#loginPasswordInput"),
   loginButton: $("#loginButton"),
   loginError: $("#loginError"),
   appHeader: $("#appHeader"),
   app: $("#app"),
+  manageUsersButton: $("#manageUsersButton"),
   logoutButton: $("#logoutButton"),
   draftTitleInput: $("#draftTitleInput"),
   draftSelect: $("#draftSelect"),
   draftSearchInput: $("#draftSearchInput"),
   draftStatusFilterInput: $("#draftStatusFilterInput"),
+  ownerFilterField: $("#ownerFilterField"),
+  ownerFilterInput: $("#ownerFilterInput"),
   draftBrowser: $("#draftBrowser"),
   backendEndpointInput: $("#backendEndpointInput"),
-  editorPasswordInput: $("#editorPasswordInput"),
   saveBackendButton: $("#saveBackendButton"),
   pullBackendButton: $("#pullBackendButton"),
   pushBackendButton: $("#pushBackendButton"),
@@ -127,6 +136,14 @@ const dom = {
   htmlOutput: $("#htmlOutput"),
   preview: $("#preview"),
   toggleDirectionButton: $("#toggleDirectionButton"),
+  userManagementDialog: $("#userManagementDialog"),
+  closeUserManagementButton: $("#closeUserManagementButton"),
+  newUsernameInput: $("#newUsernameInput"),
+  newUserPasswordInput: $("#newUserPasswordInput"),
+  newUserAdminInput: $("#newUserAdminInput"),
+  addUserButton: $("#addUserButton"),
+  userManagementList: $("#userManagementList"),
+  userManagementStatus: $("#userManagementStatus"),
   toast: $("#toast")
 };
 
@@ -158,6 +175,8 @@ function createDraft(title = DEFAULT_DRAFT_TITLE) {
     editedAfterGeneration: false,
     processingError: "",
     processingRunId: "",
+    ownerUserId: defaultOwnerUserIdForNewDraft(),
+    ownerUsername: defaultOwnerUsernameForNewDraft(),
     createdAt: now,
     updatedAt: now
   };
@@ -165,6 +184,19 @@ function createDraft(title = DEFAULT_DRAFT_TITLE) {
 
 function activeDraft() {
   return state.drafts.find((draft) => draft.id === state.activeId) || state.drafts[0];
+}
+
+function defaultOwnerUserIdForNewDraft() {
+  if (state.currentUser?.isAdmin && state.adminUserFilter && state.adminUserFilter !== "all") {
+    return state.adminUserFilter;
+  }
+  return state.currentUser?.id || "";
+}
+
+function defaultOwnerUsernameForNewDraft() {
+  const id = defaultOwnerUserIdForNewDraft();
+  if (!id) return "";
+  return userById(id)?.username || state.currentUser?.username || "";
 }
 
 async function loadState() {
@@ -215,6 +247,8 @@ function normalizeDraft(draft) {
   normalized.editedAfterGeneration = Boolean(normalized.editedAfterGeneration);
   normalized.processingError = normalized.processingError || "";
   normalized.processingRunId = normalized.processingRunId || "";
+  normalized.ownerUserId = normalized.ownerUserId || "";
+  normalized.ownerUsername = normalized.ownerUsername || "";
   Object.assign(normalized, DEFAULT_SUMMARY_OPTIONS);
   return normalized;
 }
@@ -368,10 +402,13 @@ async function migrateLocalStorageDrafts() {
 function bindEvents() {
   dom.loginForm.addEventListener("submit", (event) => {
     event.preventDefault();
-    loginWithPassword(dom.loginPasswordInput.value);
+    loginWithCredentials(dom.loginUsernameInput.value, dom.loginPasswordInput.value);
   });
 
   dom.logoutButton.addEventListener("click", logout);
+  dom.manageUsersButton?.addEventListener("click", openUserManagement);
+  dom.closeUserManagementButton?.addEventListener("click", closeUserManagement);
+  dom.addUserButton?.addEventListener("click", addUserFromDialog);
 
   dom.newDraftButton.addEventListener("click", () => {
     const draft = createDraft();
@@ -422,6 +459,11 @@ function bindEvents() {
     state.draftStatusFilter = dom.draftStatusFilterInput.value;
     renderDraftSelect();
     renderDraftBrowser();
+  });
+
+  dom.ownerFilterInput?.addEventListener("change", async () => {
+    state.adminUserFilter = dom.ownerFilterInput.value || "all";
+    await pullBackendSync({ skipConfirm: true });
   });
 
   dom.draftTitleInput.addEventListener("input", () => {
@@ -506,36 +548,71 @@ function bindEvents() {
   dom.preview.addEventListener("click", openPreviewLinkInNewTab, true);
 }
 
-async function loginWithPassword(password) {
-  const value = normalizeEditorPassword(password);
-  if (!value) {
-    showLoginError("Enter the editor password.");
+async function loginWithCredentials(username, password) {
+  const cleanUsername = String(username || "").trim();
+  const cleanPassword = String(password || "");
+  if (!cleanUsername || !cleanPassword) {
+    showLoginError("Enter username and password.");
     return;
   }
 
   dom.loginButton.disabled = true;
   dom.loginButton.querySelector("span:last-child").textContent = "Opening";
   hideLoginError();
-  state.editorPassword = value;
-  dom.editorPasswordInput.value = value;
-  dom.loginPasswordInput.value = value;
 
-  const loaded = await pullBackendSync({ skipConfirm: true, quiet: true });
-  dom.loginButton.disabled = false;
-  dom.loginButton.querySelector("span:last-child").textContent = "Open Workspace";
+  try {
+    clearLegacyEditorPassword();
+    const payload = await backendPost({
+      action: "login",
+      username: cleanUsername,
+      password: cleanPassword
+    }, { skipAuth: true });
+    if (!payload?.sessionToken || !payload?.user) {
+      throw new Error("Login did not return a session.");
+    }
 
-  if (!loaded) {
-    state.editorPassword = "";
-    dom.editorPasswordInput.value = "";
-    forgetEditorPassword();
-    showLoginError("The password did not open the shared workspace.");
-    return;
+    state.sessionToken = payload.sessionToken;
+    state.currentUser = payload.user;
+    state.users = Array.isArray(payload.users) ? payload.users : [];
+    rememberSession(payload.sessionToken, cleanUsername);
+    dom.loginPasswordInput.value = "";
+
+    const loaded = await pullBackendSync({ skipConfirm: true, quiet: true });
+    if (!loaded) throw new Error("Could not load your workspace.");
+
+    await loadDefaultPrompt({ quiet: true });
+    showWorkspace();
+    showToast("Workspace opened.");
+  } catch (error) {
+    state.sessionToken = "";
+    state.currentUser = null;
+    state.users = [];
+    forgetSession();
+    showLoginError(error.message || "The credentials did not open the workspace.");
+  } finally {
+    dom.loginButton.disabled = false;
+    dom.loginButton.querySelector("span:last-child").textContent = "Open Workspace";
   }
+}
 
-  await loadDefaultPrompt({ quiet: true });
-  rememberEditorPassword(value);
-  showWorkspace();
-  showToast("Shared workspace opened.");
+async function restoreSession() {
+  try {
+    const payload = await backendPost({ action: "currentUser" });
+    if (!payload?.user) return false;
+    updateUserContextFromPayload(payload);
+    const loaded = await pullBackendSync({ skipConfirm: true, quiet: true });
+    if (!loaded) return false;
+    await loadDefaultPrompt({ quiet: true });
+    showWorkspace();
+    return true;
+  } catch (error) {
+    console.warn("Session restore failed", error);
+    state.sessionToken = "";
+    state.currentUser = null;
+    state.users = [];
+    forgetSession();
+    return false;
+  }
 }
 
 function showWorkspace() {
@@ -543,6 +620,7 @@ function showWorkspace() {
   dom.loginScreen.hidden = true;
   dom.appHeader.hidden = false;
   dom.app.hidden = false;
+  renderUserAccess();
   startAutoRefresh();
   render();
 }
@@ -554,7 +632,7 @@ function showLogin(message = "") {
   dom.appHeader.hidden = true;
   dom.app.hidden = true;
   if (message) showLoginError(message);
-  window.setTimeout(() => dom.loginPasswordInput.focus(), 0);
+  window.setTimeout(() => (dom.loginUsernameInput.value ? dom.loginPasswordInput : dom.loginUsernameInput).focus(), 0);
 }
 
 function startAutoRefresh() {
@@ -582,53 +660,67 @@ function stopAutoRefresh() {
   state.autoRefreshTimer = null;
 }
 
-function logout() {
-  state.editorPassword = "";
-  dom.editorPasswordInput.value = "";
+async function logout() {
+  const token = state.sessionToken;
+  if (token) {
+    backendPost({ action: "logout" }).catch((error) => {
+      console.warn("Logout request failed", error);
+    });
+  }
+  state.sessionToken = "";
+  state.currentUser = null;
+  state.users = [];
   dom.loginPasswordInput.value = "";
-  forgetEditorPassword();
+  forgetSession();
   showLogin();
 }
 
-function rememberEditorPassword(value) {
-  const normalized = normalizeEditorPassword(value);
-  state.editorPassword = normalized;
-  sessionStorage.setItem(PASSWORD_SESSION_KEY, normalized);
+function rememberSession(token, username) {
+  const value = String(token || "").trim();
+  state.sessionToken = value;
+  sessionStorage.setItem(SESSION_TOKEN_SESSION_KEY, value);
   try {
-    localStorage.setItem(PASSWORD_STORAGE_KEY, normalized);
+    localStorage.setItem(SESSION_TOKEN_STORAGE_KEY, value);
+    localStorage.setItem(USERNAME_STORAGE_KEY, String(username || "").trim());
   } catch (error) {
-    console.warn("Could not persist editor password", error);
+    console.warn("Could not persist session", error);
   }
 }
 
-function savedEditorPassword() {
-  if (state.editorPassword) return normalizeEditorPassword(state.editorPassword);
+function savedSessionToken() {
+  if (state.sessionToken) return state.sessionToken;
   try {
-    const persisted = localStorage.getItem(PASSWORD_STORAGE_KEY);
-    if (persisted) return normalizeEditorPassword(persisted);
+    const persisted = localStorage.getItem(SESSION_TOKEN_STORAGE_KEY);
+    if (persisted) return String(persisted || "").trim();
   } catch (error) {
-    console.warn("Could not read persisted editor password", error);
+    console.warn("Could not read persisted session", error);
   }
-  return normalizeEditorPassword(sessionStorage.getItem(PASSWORD_SESSION_KEY) || "");
+  return String(sessionStorage.getItem(SESSION_TOKEN_SESSION_KEY) || "").trim();
 }
 
-function normalizeEditorPassword(value) {
-  let text = String(value || "").trim();
-  if (/^EDITOR_PASSWORD\s*=/i.test(text)) {
-    text = text.replace(/^EDITOR_PASSWORD\s*=/i, "").trim();
+function savedUsername() {
+  try {
+    return String(localStorage.getItem(USERNAME_STORAGE_KEY) || "").trim();
+  } catch {
+    return "";
   }
-  if ((text.startsWith('"') && text.endsWith('"')) || (text.startsWith("'") && text.endsWith("'"))) {
-    text = text.slice(1, -1).trim();
-  }
-  return text;
 }
 
-function forgetEditorPassword() {
-  sessionStorage.removeItem(PASSWORD_SESSION_KEY);
+function forgetSession() {
+  sessionStorage.removeItem(SESSION_TOKEN_SESSION_KEY);
   try {
-    localStorage.removeItem(PASSWORD_STORAGE_KEY);
+    localStorage.removeItem(SESSION_TOKEN_STORAGE_KEY);
   } catch (error) {
-    console.warn("Could not clear persisted editor password", error);
+    console.warn("Could not clear persisted session", error);
+  }
+}
+
+function clearLegacyEditorPassword() {
+  sessionStorage.removeItem(OLD_PASSWORD_SESSION_KEY);
+  try {
+    localStorage.removeItem(OLD_PASSWORD_STORAGE_KEY);
+  } catch (error) {
+    console.warn("Could not clear legacy editor password", error);
   }
 }
 
@@ -640,6 +732,164 @@ function showLoginError(message) {
 function hideLoginError() {
   dom.loginError.textContent = "";
   dom.loginError.hidden = true;
+}
+
+function renderUserAccess() {
+  const isAdmin = Boolean(state.currentUser?.isAdmin);
+  if (dom.manageUsersButton) dom.manageUsersButton.hidden = !isAdmin;
+  if (dom.ownerFilterField) dom.ownerFilterField.hidden = !isAdmin;
+  if (dom.saveDefaultPromptButton) dom.saveDefaultPromptButton.hidden = !isAdmin;
+  renderOwnerFilter();
+  renderUserManagement();
+}
+
+function renderOwnerFilter() {
+  if (!dom.ownerFilterInput) return;
+  const users = sortedUsers();
+  const currentValue = state.adminUserFilter || "all";
+  dom.ownerFilterInput.replaceChildren(
+    optionElement("all", "All users"),
+    ...users.map((user) => optionElement(user.id, user.username))
+  );
+  dom.ownerFilterInput.value = users.some((user) => user.id === currentValue) ? currentValue : "all";
+  state.adminUserFilter = dom.ownerFilterInput.value;
+}
+
+function optionElement(value, label) {
+  const option = document.createElement("option");
+  option.value = value;
+  option.textContent = label;
+  return option;
+}
+
+function sortedUsers() {
+  return [...(state.users || [])].sort((a, b) => String(a.username || "").localeCompare(String(b.username || "")));
+}
+
+function userById(id) {
+  return (state.users || []).find((user) => user.id === id) || null;
+}
+
+function userLabel(id) {
+  if (!id) return "";
+  return userById(id)?.username || (state.currentUser?.id === id ? state.currentUser.username : "");
+}
+
+function openUserManagement() {
+  if (!state.currentUser?.isAdmin || !dom.userManagementDialog) return;
+  renderUserManagement();
+  if (typeof dom.userManagementDialog.showModal === "function") {
+    dom.userManagementDialog.showModal();
+  } else {
+    dom.userManagementDialog.setAttribute("open", "");
+  }
+  window.setTimeout(() => dom.newUsernameInput?.focus(), 0);
+}
+
+function closeUserManagement() {
+  if (!dom.userManagementDialog) return;
+  if (typeof dom.userManagementDialog.close === "function") {
+    dom.userManagementDialog.close();
+  } else {
+    dom.userManagementDialog.removeAttribute("open");
+  }
+}
+
+function renderUserManagement() {
+  if (!dom.userManagementList) return;
+  if (!state.currentUser?.isAdmin) {
+    dom.userManagementList.replaceChildren();
+    return;
+  }
+
+  const users = sortedUsers();
+  if (!users.length) {
+    const empty = document.createElement("p");
+    empty.className = "management-empty";
+    empty.textContent = "No users.";
+    dom.userManagementList.replaceChildren(empty);
+    return;
+  }
+
+  dom.userManagementList.replaceChildren(
+    ...users.map((user) => {
+      const row = document.createElement("div");
+      row.className = "user-management-row";
+
+      const details = document.createElement("div");
+      const name = document.createElement("strong");
+      name.textContent = user.username;
+      const meta = document.createElement("p");
+      meta.textContent = [
+        user.isAdmin ? "Admin" : "Editor",
+        `${Number(user.draftCount || 0)} source${Number(user.draftCount || 0) === 1 ? "" : "s"}`
+      ].join(" · ");
+      details.append(name, meta);
+
+      const remove = document.createElement("button");
+      remove.type = "button";
+      remove.className = "button danger";
+      remove.textContent = "Delete";
+      remove.disabled = user.id === state.currentUser?.id;
+      remove.addEventListener("click", () => deleteUserFromDialog(user));
+
+      row.append(details, remove);
+      return row;
+    })
+  );
+}
+
+async function addUserFromDialog() {
+  const username = dom.newUsernameInput.value.trim();
+  const password = dom.newUserPasswordInput.value;
+  const isAdmin = dom.newUserAdminInput.checked;
+  if (!username || !password) {
+    setUserManagementStatus("Enter username and password.");
+    return;
+  }
+
+  dom.addUserButton.disabled = true;
+  try {
+    const payload = await backendPost({
+      action: "addUser",
+      username,
+      password,
+      isAdmin
+    });
+    state.users = Array.isArray(payload.users) ? payload.users : state.users;
+    dom.newUsernameInput.value = "";
+    dom.newUserPasswordInput.value = "";
+    dom.newUserAdminInput.checked = false;
+    renderUserAccess();
+    setUserManagementStatus("User added.");
+  } catch (error) {
+    setUserManagementStatus(error.message || "Could not add user.");
+  } finally {
+    dom.addUserButton.disabled = false;
+  }
+}
+
+async function deleteUserFromDialog(user) {
+  if (!user || user.id === state.currentUser?.id) return;
+  if (!window.confirm(`Delete user "${user.username}"? Their sources will move to your admin user.`)) return;
+
+  try {
+    const payload = await backendPost({
+      action: "deleteUser",
+      userId: user.id
+    });
+    state.users = Array.isArray(payload.users) ? payload.users : state.users;
+    if (state.adminUserFilter === user.id) state.adminUserFilter = "all";
+    renderUserAccess();
+    await pullBackendSync({ skipConfirm: true, quiet: true });
+    setUserManagementStatus("User deleted.");
+  } catch (error) {
+    setUserManagementStatus(error.message || "Could not delete user.");
+  }
+}
+
+function setUserManagementStatus(message) {
+  if (dom.userManagementStatus) dom.userManagementStatus.textContent = message || "";
 }
 
 function switchSourceTab(tab) {
@@ -888,6 +1138,7 @@ async function downloadSourceFile(source) {
 
 function render() {
   const draft = activeDraft();
+  renderUserAccess();
   renderDraftSelect();
   renderDraftBrowser();
   dom.draftTitleInput.value = draft.title;
@@ -994,6 +1245,7 @@ function renderDraftBrowser() {
 
       const meta = document.createElement("p");
       meta.textContent = [
+        state.currentUser?.isAdmin ? `user ${draft.ownerUsername || userLabel(draft.ownerUserId) || "unknown"}` : "",
         `${draft.sources.length} source${draft.sources.length === 1 ? "" : "s"}`,
         `last modified ${formatDateTime(draft.updatedAt)}`,
         draft.processedAt ? `last generated ${formatDateTime(draft.processedAt)}` : "",
@@ -1518,26 +1770,34 @@ function backendEndpoint() {
   return DEFAULT_BACKEND_ENDPOINT;
 }
 
-function editorPassword() {
-  return normalizeEditorPassword(savedEditorPassword() || dom.editorPasswordInput.value);
-}
-
-async function backendPost(payload) {
+async function backendPost(payload, options = {}) {
   const endpoint = backendEndpoint();
   if (!endpoint) throw new Error("Shared storage is not configured.");
+  const headers = {
+    "Content-Type": "application/json"
+  };
+  if (!options.skipAuth) {
+    const token = String(state.sessionToken || "").trim();
+    if (!token) throw new Error("Please sign in again.");
+    headers.Authorization = `Bearer ${token}`;
+  }
 
   const response = await fetch(endpoint, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "X-Editor-Password": editorPassword()
-    },
+    headers,
     body: JSON.stringify(payload)
   });
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
     const details = data.details?.error?.message || data.details?.message || "";
     const message = [data.error || `Shared storage returned ${response.status}`, details].filter(Boolean).join("\n\n");
+    if (response.status === 401 && !options.skipAuth) {
+      state.sessionToken = "";
+      state.currentUser = null;
+      state.users = [];
+      forgetSession();
+      if (state.authenticated) showLogin(message);
+    }
     throw new Error(message);
   }
   return data;
@@ -1548,8 +1808,27 @@ async function saveBackendSettings() {
   dom.proxyEndpointInput.value = DEFAULT_BACKEND_ENDPOINT;
   dom.backendEndpointInput.value = DEFAULT_BACKEND_ENDPOINT;
   await saveState();
-  setSyncStatus("Shared storage saved. Editor password is not stored.");
+  setSyncStatus("Shared storage saved.");
   showToast("Shared storage saved.");
+}
+
+function ownerFilterForRequest() {
+  return state.currentUser?.isAdmin && state.adminUserFilter !== "all" ? state.adminUserFilter : "";
+}
+
+function ensureDraftOwnersForCurrentScope() {
+  const fallbackOwnerId = defaultOwnerUserIdForNewDraft();
+  const fallbackOwnerName = defaultOwnerUsernameForNewDraft();
+  for (const draft of state.drafts) {
+    if (!draft.ownerUserId) draft.ownerUserId = fallbackOwnerId;
+    if (!draft.ownerUsername) draft.ownerUsername = userLabel(draft.ownerUserId) || fallbackOwnerName;
+  }
+}
+
+function updateUserContextFromPayload(payload) {
+  if (payload?.user) state.currentUser = payload.user;
+  if (Array.isArray(payload?.users)) state.users = payload.users;
+  renderUserAccess();
 }
 
 async function pushBackendSync(options = {}) {
@@ -1561,6 +1840,20 @@ async function pushBackendSync(options = {}) {
   setSyncBusy(true, options.busyMessage || "Saving shared work...");
   try {
     await saveState();
+    ensureDraftOwnersForCurrentScope();
+    const ownerUserId = ownerFilterForRequest();
+    let payload = {
+      version: 1,
+      app: "summary-html-desk",
+      updatedAt: new Date().toISOString(),
+      drafts: state.drafts.map(draftForRemote)
+    };
+    await backendPost({
+      action: "saveSharedState",
+      ownerUserId,
+      payload
+    });
+
     let uploadedFiles = 0;
     for (const draft of state.drafts) {
       for (const source of draft.sources) {
@@ -1569,7 +1862,8 @@ async function pushBackendSync(options = {}) {
         if (!stored?.blob) continue;
         const saved = await backendPost({
           action: "saveSourceFile",
-          source: sourceForRemoteFile(source),
+          draftId: draft.id,
+          source: sourceForRemoteFile(source, draft),
           fileData: await fileToDataUrl(stored.blob)
         });
         source.remoteFilePath = saved.remoteFilePath || source.remoteFilePath || "";
@@ -1577,16 +1871,19 @@ async function pushBackendSync(options = {}) {
       }
     }
 
-    const payload = {
-      version: 1,
-      app: "summary-html-desk",
-      updatedAt: new Date().toISOString(),
-      drafts: state.drafts.map(draftForRemote)
-    };
-    await backendPost({
-      action: "saveSharedState",
-      payload
-    });
+    if (uploadedFiles) {
+      payload = {
+        version: 1,
+        app: "summary-html-desk",
+        updatedAt: new Date().toISOString(),
+        drafts: state.drafts.map(draftForRemote)
+      };
+      await backendPost({
+        action: "saveSharedState",
+        ownerUserId,
+        payload
+      });
+    }
     state.remoteDraftIds = new Set(state.drafts.map((draft) => draft.id));
     await saveState();
     setSyncStatus(options.doneMessage || `Saved ${state.drafts.length} items and ${uploadedFiles} origin files.`);
@@ -1614,8 +1911,12 @@ async function pullBackendSync(options = {}) {
   const previousActiveId = state.activeId;
   setSyncBusy(true, options.background ? "" : "Refreshing shared work...");
   try {
-    const payload = await backendPost({ action: "loadSharedState" });
+    const payload = await backendPost({
+      action: "loadSharedState",
+      ownerUserId: ownerFilterForRequest()
+    });
     if (!payload || !Array.isArray(payload.drafts)) throw new Error("Shared drafts file is invalid.");
+    updateUserContextFromPayload(payload);
 
     const remoteDrafts = payload.drafts.map(normalizeDraft).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
     const remoteIds = new Set(remoteDrafts.map((draft) => draft.id));
@@ -1809,9 +2110,10 @@ function compactSourceForRemote(source) {
   return next;
 }
 
-function sourceForRemoteFile(source) {
+function sourceForRemoteFile(source, draft = activeDraft()) {
   return {
     id: source.id,
+    draftId: draft?.id || "",
     title: source.title,
     filename: source.filename,
     mimeType: source.mimeType,
@@ -2064,7 +2366,9 @@ function importedDraftCopy(draft) {
   const copy = normalizeDraft({
     ...draft,
     id: createId(),
-    title: `${draft.title || "Imported summary"}`
+    title: `${draft.title || "Imported summary"}`,
+    ownerUserId: defaultOwnerUserIdForNewDraft(),
+    ownerUsername: defaultOwnerUsernameForNewDraft()
   });
   copy.sources = copy.sources.map((source) => ({
     ...source,
@@ -2334,10 +2638,14 @@ async function init() {
     render();
     switchSourceTab(state.activeSourceTab);
     registerServiceWorker();
-    const savedPassword = savedEditorPassword();
-    if (savedPassword) {
-      dom.loginPasswordInput.value = savedPassword;
-      await loginWithPassword(savedPassword);
+    clearLegacyEditorPassword();
+    const username = savedUsername();
+    if (username) dom.loginUsernameInput.value = username;
+    const token = savedSessionToken();
+    if (token) {
+      state.sessionToken = token;
+      const restored = await restoreSession();
+      if (!restored) showLogin();
     } else {
       showLogin();
     }

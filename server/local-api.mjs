@@ -1,4 +1,3 @@
-import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -6,14 +5,20 @@ import dotenv from "dotenv";
 import express from "express";
 import {
   checkStorage,
-  getSourceFile,
+  createUser,
+  deleteSessionToken,
+  deleteUser,
+  getSourceFileForUser,
   httpError,
   initDatabase,
+  listUsers,
   loadDefaultPrompt,
   loadSharedState,
+  loginUser,
   saveDefaultPrompt,
   saveSharedState,
-  saveSourceFile
+  saveSourceFile,
+  userFromSessionToken
 } from "./postgres-storage.mjs";
 
 dotenv.config();
@@ -50,27 +55,75 @@ app.options("/", (request, response) => {
 
 app.post("/", async (request, response) => {
   try {
-    await requireEditorPassword(request);
     const payload = request.body || {};
+    const action = payload.action || "loadSharedState";
 
-    switch (payload.action || "loadSharedState") {
+    if (action === "login") {
+      const session = await loginUser(payload.username, payload.password);
+      return response.json({
+        ...session,
+        users: session.user?.isAdmin ? await listUsers() : []
+      });
+    }
+
+    if (action === "logout") {
+      await deleteSessionToken(sessionTokenFromRequest(request));
+      return response.json({ ok: true });
+    }
+
+    const user = await requireUser(request);
+
+    switch (action) {
+      case "currentUser":
+        return response.json({
+          user,
+          users: user.isAdmin ? await listUsers() : []
+        });
+      case "listUsers":
+        requireAdmin(user);
+        return response.json({ users: await listUsers() });
+      case "addUser":
+        requireAdmin(user);
+        return response.json({
+          user: await createUser({
+            username: payload.username,
+            password: payload.password,
+            isAdmin: payload.isAdmin
+          }),
+          users: await listUsers()
+        });
+      case "deleteUser":
+        requireAdmin(user);
+        await deleteUser(payload.userId, user);
+        return response.json({ ok: true, users: await listUsers() });
       case "saveSourceFile":
         return response.json(await saveSourceFile({
           ...(payload.source || {}),
           draftId: payload.draftId || payload.source?.draftId || null
-        }, payload.fileData));
+        }, payload.fileData, { user }));
       case "saveSharedState":
-        return response.json(await saveSharedState(payload.payload));
+        return response.json(await saveSharedState(payload.payload, {
+          user,
+          ownerUserId: payload.ownerUserId || ""
+        }));
       case "loadSharedState":
-        return response.json(await loadSharedState());
+        return response.json({
+          ...await loadSharedState({
+            user,
+            ownerUserId: payload.ownerUserId || ""
+          }),
+          user,
+          users: user.isAdmin ? await listUsers() : []
+        });
       case "loadDefaultPrompt":
         return response.json(await loadDefaultPrompt({
           localPromptFallback: readLocalPrompt()
         }));
       case "saveDefaultPrompt":
+        requireAdmin(user);
         return response.json(await saveDefaultPrompt(payload.prompt));
       case "getSourceFile":
-        return response.json(await getSourceFile(payload.remoteFilePath));
+        return response.json(await getSourceFileForUser(payload.remoteFilePath, user));
       case "checkStorage":
         return response.json(await checkStorage());
       case "summarize":
@@ -105,7 +158,7 @@ function corsMiddleware(request, response, next) {
     response.setHeader("Vary", "Origin");
   }
   response.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-  response.setHeader("Access-Control-Allow-Headers", "Content-Type, X-Editor-Password");
+  response.setHeader("Access-Control-Allow-Headers", "Authorization, Content-Type");
 
   if (request.method === "OPTIONS") {
     response.status(204).end();
@@ -123,42 +176,22 @@ function allowedOrigins() {
     .filter((value, index, array) => array.indexOf(value) === index);
 }
 
-async function requireEditorPassword(request) {
-  const supplied = normalizeEditorPassword(request.headers["x-editor-password"] || request.body?.editorPassword || "");
-  const plain = process.env.EDITOR_PASSWORD || "";
-  const hash = String(process.env.EDITOR_PASSWORD_SHA256 || "").trim().toLowerCase();
-
-  if (!plain && !hash) {
-    if (!supplied.trim()) throw httpError("Enter the editor password.", 401);
-    return;
-  }
-
-  const valid = hash
-    ? safeEqual(sha256Hex(supplied), hash)
-    : safeEqual(supplied, plain);
-  if (!valid) throw httpError("Invalid editor password.", 401);
+async function requireUser(request) {
+  const user = await userFromSessionToken(sessionTokenFromRequest(request));
+  if (!user) throw httpError("Please sign in again.", 401);
+  return user;
 }
 
-function normalizeEditorPassword(value) {
-  let text = String(value || "").trim();
-  if (/^EDITOR_PASSWORD\s*=/i.test(text)) {
-    text = text.replace(/^EDITOR_PASSWORD\s*=/i, "").trim();
-  }
-  if ((text.startsWith('"') && text.endsWith('"')) || (text.startsWith("'") && text.endsWith("'"))) {
-    text = text.slice(1, -1).trim();
-  }
-  return text;
+function requireAdmin(user) {
+  if (!user?.isAdmin) throw httpError("Admin permission is required.", 403);
 }
 
-function sha256Hex(value) {
-  return crypto.createHash("sha256").update(String(value || "")).digest("hex");
-}
-
-function safeEqual(left, right) {
-  const a = Buffer.from(String(left || ""));
-  const b = Buffer.from(String(right || ""));
-  if (a.length !== b.length) return false;
-  return crypto.timingSafeEqual(a, b);
+function sessionTokenFromRequest(request) {
+  const authorization = String(request.headers.authorization || "").trim();
+  if (/^Bearer\s+/i.test(authorization)) {
+    return authorization.replace(/^Bearer\s+/i, "").trim();
+  }
+  return String(request.body?.sessionToken || "").trim();
 }
 
 function readLocalPrompt() {
