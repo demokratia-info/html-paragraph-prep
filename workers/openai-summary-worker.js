@@ -175,7 +175,7 @@ async function saveSharedState(payload, env) {
   await githubPutContent(
     config,
     sharedStatePath(config),
-    utf8ToBase64(JSON.stringify(statePayload, null, 2)),
+    utf8ToBase64(JSON.stringify(statePayload)),
     "Update shared summary drafts"
   );
   return {

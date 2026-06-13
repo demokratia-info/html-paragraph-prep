@@ -772,7 +772,7 @@ function saveSharedState(payload, message) {
     updatedAt: new Date().toISOString(),
     drafts: Array.isArray(payload.drafts) ? payload.drafts : []
   };
-  githubPutContent(STATE_PATH, Buffer.from(JSON.stringify(nextPayload, null, 2), "utf8").toString("base64"), message);
+  githubPutContent(STATE_PATH, Buffer.from(JSON.stringify(nextPayload), "utf8").toString("base64"), message);
 }
 
 function githubGetContent(remotePath) {
