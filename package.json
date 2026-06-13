@@ -1,0 +1,13 @@
+{
+  "scripts": {
+    "db:init": "node scripts/init_postgres_storage.mjs",
+    "db:migrate:github": "node scripts/migrate_github_state_to_postgres.mjs",
+    "process:codex": "node scripts/process_pending_with_codex.mjs",
+    "server": "node server/local-api.mjs"
+  },
+  "dependencies": {
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
+    "pg": "^8.21.0"
+  }
+}

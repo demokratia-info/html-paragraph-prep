@@ -5,8 +5,19 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
+import {
+  closePool,
+  getSourceFileBuffer,
+  isPostgresRemoteFilePath,
+  loadDefaultPrompt as loadPostgresDefaultPrompt,
+  loadSharedState as loadPostgresSharedState,
+  saveDefaultPrompt as savePostgresDefaultPrompt,
+  saveSharedState as savePostgresSharedState,
+  sourceIdFromRemoteFilePath
+} from "../server/postgres-storage.mjs";
 
 const REPO_ROOT = path.resolve(new URL("..", import.meta.url).pathname);
+const STORAGE_BACKEND = String(process.env.STORAGE_BACKEND || "postgres").trim().toLowerCase();
 const DATA_REPO = process.env.DATA_REPO || "demokratia-info/html-paragraph-prep-data";
 const [GITHUB_OWNER, GITHUB_REPO] = DATA_REPO.split("/");
 const GITHUB_BRANCH = process.env.DATA_BRANCH || "main";
@@ -31,21 +42,26 @@ if (!GITHUB_OWNER || !GITHUB_REPO) {
   fail("DATA_REPO must look like owner/repo.");
 }
 
-main().catch((error) => {
-  fail(error?.stack || error?.message || String(error));
-});
+main()
+  .catch((error) => {
+    process.stderr.write(`[${new Date().toISOString()}] ${error?.stack || error?.message || String(error)}${os.EOL}`);
+    process.exitCode = 1;
+  })
+  .finally(async () => {
+    await closePool();
+  });
 
 async function main() {
   ensureDir(PROCESSING_ROOT);
   if (process.argv.includes("--sync-default-prompt")) {
-    syncDefaultPrompt();
+    await syncDefaultPrompt();
     log("Default prompt sync complete.");
     return;
   }
 
   let processed = 0;
   for (let index = 0; index < MAX_PENDING_PER_RUN; index += 1) {
-    const state = loadSharedState();
+    const state = await loadSharedState();
     if (!state) {
       log("No shared work list found yet.");
       return;
@@ -64,45 +80,54 @@ async function main() {
   log(`Processed ${processed} item${processed === 1 ? "" : "s"}.`);
 }
 
-function syncDefaultPrompt() {
-  if (!fs.existsSync(LOCAL_PROMPT_PATH)) return;
-  const localPrompt = fs.readFileSync(LOCAL_PROMPT_PATH, "utf8").trim();
+async function syncDefaultPrompt() {
+  const localPrompt = loadLocalPrompt();
   if (!localPrompt) return;
 
-  const existing = githubGetContent(DEFAULT_PROMPT_PATH);
-  const existingText = existing?.content
-    ? Buffer.from(stripBase64Whitespace(existing.content), "base64").toString("utf8").trim()
-    : "";
+  const existingText = STORAGE_BACKEND === "postgres"
+    ? String((await loadPostgresDefaultPrompt()).prompt || "").trim()
+    : String(githubGetTextContent(DEFAULT_PROMPT_PATH) || "").trim();
   if (existingText === localPrompt) return;
 
-  githubPutContent(
-    DEFAULT_PROMPT_PATH,
-    Buffer.from(`${localPrompt}\n`, "utf8").toString("base64"),
-    "Update default summary prompt"
-  );
+  if (STORAGE_BACKEND === "postgres") {
+    await savePostgresDefaultPrompt(localPrompt);
+  } else {
+    githubPutContent(
+      DEFAULT_PROMPT_PATH,
+      Buffer.from(`${localPrompt}\n`, "utf8").toString("base64"),
+      "Update default summary prompt"
+    );
+  }
   log("Default prompt updated in shared storage.");
 }
 
-function loadRequiredDefaultPrompt() {
-  const prompt = String(githubGetTextContent(DEFAULT_PROMPT_PATH) || "").trim();
+async function loadRequiredDefaultPrompt() {
+  const prompt = STORAGE_BACKEND === "postgres"
+    ? String((await loadPostgresDefaultPrompt({ localPromptFallback: loadLocalPrompt() })).prompt || "").trim()
+    : String(githubGetTextContent(DEFAULT_PROMPT_PATH) || "").trim();
   if (!prompt) {
-    throw new Error(`Default prompt is missing or empty in ${DATA_REPO}/${DEFAULT_PROMPT_PATH}.`);
+    throw new Error("Default prompt is missing or empty in shared storage.");
   }
   return prompt;
+}
+
+function loadLocalPrompt() {
+  if (!fs.existsSync(LOCAL_PROMPT_PATH)) return "";
+  return fs.readFileSync(LOCAL_PROMPT_PATH, "utf8").trim();
 }
 
 async function processDraft(draft) {
   const runId = `${Date.now()}-${process.pid}-${safePathPart(draft.id)}`;
   const now = new Date().toISOString();
-  const defaultPrompt = loadRequiredDefaultPrompt();
-  const draftInState = markDraftProcessing(draft, runId, now);
+  const defaultPrompt = await loadRequiredDefaultPrompt();
+  const draftInState = await markDraftProcessing(draft, runId, now);
 
   const workDir = path.join(PROCESSING_ROOT, safePathPart(draft.id), runId);
   ensureDir(workDir);
   ensureDir(path.join(workDir, "sources"));
 
   try {
-    const preparedSources = prepareSources(draftInState, workDir);
+    const preparedSources = await prepareSources(draftInState, workDir);
     const unreadableFiles = preparedSources.filter((source) => source.extractionError && !source.text && !source.extractedText);
     if (unreadableFiles.length && unreadableFiles.length === preparedSources.length) {
       throw new Error([
@@ -122,7 +147,7 @@ async function processDraft(draft) {
     if (!resultText) throw new Error("Codex finished without returning summary text.");
     const derivedTitle = deriveTitleFromSources(preparedSources);
 
-    finalizeDraft(draft.id, runId, (freshDraft) => {
+    await finalizeDraft(draft.id, runId, (freshDraft) => {
       const processedAt = new Date().toISOString();
       freshDraft.result = resultText;
       freshDraft.regenerationBaseResult = "";
@@ -143,7 +168,7 @@ async function processDraft(draft) {
     log(`Ready: ${draft.title || draft.id}`);
   } catch (error) {
     const message = error?.message || String(error);
-    finalizeDraft(draft.id, runId, (freshDraft) => {
+    await finalizeDraft(draft.id, runId, (freshDraft) => {
       freshDraft.status = "error";
       freshDraft.processingStartedAt = "";
       freshDraft.processingRunId = "";
@@ -153,7 +178,7 @@ async function processDraft(draft) {
   }
 }
 
-function markDraftProcessing(draft, runId, startedAt) {
+async function markDraftProcessing(draft, runId, startedAt) {
   return updateSharedDraftWithRetry(draft.id, (freshDraft) => {
     freshDraft.status = "processing";
     freshDraft.processingStartedAt = startedAt;
@@ -164,8 +189,9 @@ function markDraftProcessing(draft, runId, startedAt) {
   }, `Start processing ${draft.title || draft.id}`);
 }
 
-function prepareSources(draft, workDir) {
-  return (draft.sources || []).map((source, index) => {
+async function prepareSources(draft, workDir) {
+  const preparedSources = [];
+  for (const [index, source] of (draft.sources || []).entries()) {
     const prepared = { ...source, localPath: "", localPathError: "" };
     try {
       const cachedPath = resolveCachedSourcePath(source.localPath);
@@ -174,7 +200,9 @@ function prepareSources(draft, workDir) {
         prepared.filename = prepared.filename || path.basename(cachedPath);
         prepared.mimeType = prepared.mimeType || mimeTypeFromFilename(cachedPath);
       } else if (source.remoteFilePath) {
-        const raw = githubGetRaw(source.remoteFilePath);
+        const raw = isPostgresRemoteFilePath(source.remoteFilePath)
+          ? (await getSourceFileBuffer(sourceIdFromRemoteFilePath(source.remoteFilePath))).content
+          : githubGetRaw(source.remoteFilePath);
         const filename = `${String(index + 1).padStart(2, "0")}-${safeFilename(source.filename || source.title || `source-${index + 1}`)}`;
         const localPath = path.join(workDir, "sources", filename);
         fs.writeFileSync(localPath, raw);
@@ -197,8 +225,9 @@ function prepareSources(draft, workDir) {
     } catch (error) {
       prepared.localPathError = error?.message || String(error);
     }
-    return prepared;
-  });
+    preparedSources.push(prepared);
+  }
+  return preparedSources;
 }
 
 function resolveCachedSourcePath(localPath) {
@@ -746,9 +775,9 @@ function findNextPendingDraft(drafts) {
     .sort((a, b) => String(a.queuedAt || a.updatedAt || "").localeCompare(String(b.queuedAt || b.updatedAt || "")))[0] || null;
 }
 
-function finalizeDraft(draftId, runId, updateDraft, message) {
+async function finalizeDraft(draftId, runId, updateDraft, message) {
   for (let attempt = 1; attempt <= 4; attempt += 1) {
-    const freshState = loadSharedState();
+    const freshState = await loadSharedState();
     if (!freshState) throw new Error("Shared work list disappeared while processing.");
     const freshDraft = freshState.drafts.find((item) => item.id === draftId);
     if (!freshDraft) throw new Error("Item disappeared while processing.");
@@ -759,7 +788,7 @@ function finalizeDraft(draftId, runId, updateDraft, message) {
     updateDraft(freshDraft);
 
     try {
-      saveSharedState(freshState, message);
+      await saveSharedState(freshState, message);
       return;
     } catch (error) {
       if (attempt < 4 && isGithubConflict(error)) {
@@ -771,16 +800,16 @@ function finalizeDraft(draftId, runId, updateDraft, message) {
   }
 }
 
-function updateSharedDraftWithRetry(draftId, updateDraft, message) {
+async function updateSharedDraftWithRetry(draftId, updateDraft, message) {
   for (let attempt = 1; attempt <= 4; attempt += 1) {
-    const freshState = loadSharedState();
+    const freshState = await loadSharedState();
     if (!freshState) throw new Error("Shared work list disappeared while processing.");
     const freshDraft = freshState.drafts.find((item) => item.id === draftId);
     if (!freshDraft) throw new Error("Item disappeared while processing.");
     updateDraft(freshDraft);
 
     try {
-      saveSharedState(freshState, message);
+      await saveSharedState(freshState, message);
       return freshDraft;
     } catch (error) {
       if (attempt < 4 && isGithubConflict(error)) {
@@ -793,7 +822,12 @@ function updateSharedDraftWithRetry(draftId, updateDraft, message) {
   throw new Error("Could not update shared draft after repeated GitHub conflicts.");
 }
 
-function loadSharedState() {
+async function loadSharedState() {
+  if (STORAGE_BACKEND === "postgres") {
+    const payload = await loadPostgresSharedState();
+    if (!Array.isArray(payload.drafts)) payload.drafts = [];
+    return payload;
+  }
   const text = githubGetTextContent(STATE_PATH);
   if (!text) return null;
   const payload = JSON.parse(text);
@@ -801,7 +835,7 @@ function loadSharedState() {
   return payload;
 }
 
-function saveSharedState(payload, message) {
+async function saveSharedState(payload, message) {
   const nextPayload = {
     ...payload,
     version: payload.version || 1,
@@ -809,6 +843,10 @@ function saveSharedState(payload, message) {
     updatedAt: new Date().toISOString(),
     drafts: Array.isArray(payload.drafts) ? payload.drafts.map(compactDraftForStorage) : []
   };
+  if (STORAGE_BACKEND === "postgres") {
+    await savePostgresSharedState(nextPayload);
+    return;
+  }
   githubPutContent(STATE_PATH, Buffer.from(JSON.stringify(nextPayload), "utf8").toString("base64"), message);
 }
 

@@ -6,6 +6,7 @@ LOCK_FILE="${TMPDIR:-/tmp}/summary-html-desk-codex.lock"
 
 export HOME="${HOME:-/home/talraviv}"
 export PATH="$HOME/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:${PATH:-}"
+export STORAGE_BACKEND="${STORAGE_BACKEND:-postgres}"
 
 if command -v flock >/dev/null 2>&1; then
   exec 9>"$LOCK_FILE"

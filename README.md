@@ -10,12 +10,12 @@ This project is intentionally independent of `Documents/DemocracyWebSite`.
 - Provides a compact browse list with search and status filters.
 - Keeps source links and uploaded origin files attached to each draft.
 - Accepts Hebrew source text, document links, uploaded PDFs, uploaded Word files, and uploaded text files.
-- Saves items to a shared queue that a local Codex cron job can process.
+- Saves items to a local PostgreSQL-backed shared queue that a local Codex cron job can process.
 - Keeps an editable prompt with each item, including a default prompt users can restore.
 - Converts the LLM result into clean CMS HTML.
 - Copies or downloads the generated HTML.
 - Works as a static GitHub Pages site with no build step.
-- Uses a private GitHub data repo behind the Worker for cross-computer sharing.
+- Uses a local API backed by PostgreSQL for shared summaries and source files.
 
 ## Safe Default Workflow
 
@@ -33,7 +33,30 @@ Use **Show summaries -> Ready to export** to find texts that have a result, are 
 
 The static GitHub Pages app does not contain an API key, GitHub token, or editor password. Do not put secrets into frontend code or committed files.
 
-Drafts are cached in the browser profile for local work, then shared through the private data repo. The JSON export includes draft text and source metadata, but not binary PDF/Word files.
+Drafts are cached in the browser profile for local work, then shared through the local PostgreSQL API. The SQL database stores draft text, source metadata, and uploaded/cached source files.
+
+## Local PostgreSQL API
+
+PostgreSQL should be running locally with the `html_paragraph_prep` database. Start the API before using the GitHub Pages app:
+
+```bash
+cd /home/talraviv/html-paragraph-prep
+npm run server
+```
+
+The GitHub Pages frontend is configured to call `http://127.0.0.1:8787`. This works for local use on this machine. For other users, expose the API through a secure HTTPS tunnel or deploy the API to a reachable server; do not expose PostgreSQL directly.
+
+Initialize or check the SQL schema:
+
+```bash
+npm run db:init
+```
+
+Import the previous private GitHub shared state into PostgreSQL:
+
+```bash
+npm run db:migrate:github
+```
 
 ## Local Codex Processing
 
@@ -81,9 +104,9 @@ Create a separate private data repo for shared summaries and files:
 gh repo create html-paragraph-prep-data --private --add-readme
 ```
 
-## Shared Storage Worker
+## Legacy Shared Storage Worker
 
-The Worker lets the page share summaries/files without exposing your GitHub token or editor password in GitHub Pages. The OpenAI API action still exists as a fallback, but the normal workflow is the local Codex cron job.
+The Worker was the earlier GitHub-backed storage layer. The current default frontend points to the local PostgreSQL API instead. Keep the Worker instructions below only if you need the old GitHub JSON storage fallback.
 
 1. Install Wrangler and log in to Cloudflare.
 2. Copy `workers/wrangler.toml.example` to `workers/wrangler.toml`.
@@ -101,7 +124,7 @@ wrangler secret put OPENAI_API_KEY
 wrangler deploy
 ```
 
-The app is preconfigured for `https://summary-html-desk-openai.demokratia-info.workers.dev`. If the deployed Worker URL is different, update `DEFAULT_BACKEND_ENDPOINT` in `assets/app.js`.
+To use the Worker again, update `DEFAULT_BACKEND_ENDPOINT` in `assets/app.js`.
 
 The Worker uses the OpenAI Responses API, supports text inputs, public document file URLs, private uploaded PDF/Word files stored in the data repo, and optional web search for ordinary URLs.
 
