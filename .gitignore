@@ -4,6 +4,7 @@
 wrangler.toml
 node_modules/
 dist/
+downloads/
 *.log
 .codex-processing/
 summary-cron.log
