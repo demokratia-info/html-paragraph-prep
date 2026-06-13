@@ -120,15 +120,14 @@ async function processDraft(draft) {
     runCodex(prompt, resultPath);
     const resultText = readResultText(resultPath);
     if (!resultText) throw new Error("Codex finished without returning summary text.");
-    const resultHtml = makeCmsHtml(resultText);
     const derivedTitle = deriveTitleFromSources(preparedSources);
 
     finalizeDraft(draft.id, runId, (freshDraft) => {
       const processedAt = new Date().toISOString();
       freshDraft.result = resultText;
       freshDraft.regenerationBaseResult = "";
-      freshDraft.html = resultHtml;
-      freshDraft.htmlCreatedAt = resultHtml ? processedAt : "";
+      freshDraft.html = "";
+      freshDraft.htmlCreatedAt = "";
       freshDraft.exportedAt = "";
       freshDraft.editedAfterGeneration = false;
       if (shouldReplaceDraftTitle(freshDraft.title) && derivedTitle) {
