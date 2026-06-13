@@ -4,7 +4,7 @@ const STORAGE_KEY = "summary-html-desk.drafts.v1";
 const SETTINGS_KEY = "summary-html-desk.settings.v1";
 const DB_NAME = "summary-html-desk";
 const DB_VERSION = 1;
-const APP_VERSION = "20260613-3";
+const APP_VERSION = "20260613-4";
 const DEFAULT_BACKEND_ENDPOINT = "https://summary-html-desk-openai.demokratia-info.workers.dev";
 const PASSWORD_SESSION_KEY = "summary-html-desk.editor-password.session";
 const PASSWORD_STORAGE_KEY = "summary-html-desk.editor-password.local";
@@ -239,6 +239,7 @@ function normalizeSource(source) {
     fileAvailable: Boolean(source.fileAvailable || source.fileStored),
     fileStored: Boolean(source.fileStored),
     remoteFilePath: source.remoteFilePath || "",
+    localPath: source.localPath || "",
     createdAt: source.createdAt || new Date().toISOString()
   };
 }

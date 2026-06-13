@@ -154,7 +154,12 @@ function prepareSources(draft, workDir) {
   return (draft.sources || []).map((source, index) => {
     const prepared = { ...source, localPath: "", localPathError: "" };
     try {
-      if (source.remoteFilePath) {
+      const cachedPath = resolveCachedSourcePath(source.localPath);
+      if (cachedPath) {
+        prepared.localPath = cachedPath;
+        prepared.filename = prepared.filename || path.basename(cachedPath);
+        prepared.mimeType = prepared.mimeType || mimeTypeFromFilename(cachedPath);
+      } else if (source.remoteFilePath) {
         const raw = githubGetRaw(source.remoteFilePath);
         const filename = `${String(index + 1).padStart(2, "0")}-${safeFilename(source.filename || source.title || `source-${index + 1}`)}`;
         const localPath = path.join(workDir, "sources", filename);
@@ -180,6 +185,20 @@ function prepareSources(draft, workDir) {
     }
     return prepared;
   });
+}
+
+function resolveCachedSourcePath(localPath) {
+  const value = String(localPath || "").trim();
+  if (!value) return "";
+  const resolved = path.isAbsolute(value) ? value : path.resolve(REPO_ROOT, value);
+  const relative = path.relative(REPO_ROOT, resolved);
+  if (relative.startsWith("..") || path.isAbsolute(relative)) {
+    throw new Error(`Cached source path is outside the repository: ${value}`);
+  }
+  if (!fs.existsSync(resolved)) {
+    throw new Error(`Cached source file is missing: ${value}`);
+  }
+  return resolved;
 }
 
 function shouldReplaceDraftTitle(title) {
