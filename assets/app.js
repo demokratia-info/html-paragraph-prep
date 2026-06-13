@@ -4,6 +4,7 @@ const STORAGE_KEY = "summary-html-desk.drafts.v1";
 const SETTINGS_KEY = "summary-html-desk.settings.v1";
 const DB_NAME = "summary-html-desk";
 const DB_VERSION = 1;
+const APP_VERSION = "20260613-2";
 const DEFAULT_BACKEND_ENDPOINT = "https://summary-html-desk-openai.demokratia-info.workers.dev";
 const PASSWORD_SESSION_KEY = "summary-html-desk.editor-password.session";
 const PASSWORD_STORAGE_KEY = "summary-html-desk.editor-password.local";
@@ -2262,7 +2263,7 @@ function safeRemoteFilename(value) {
 function registerServiceWorker() {
   if (!("serviceWorker" in navigator)) return;
   if (!["http:", "https:"].includes(window.location.protocol)) return;
-  navigator.serviceWorker.register("./service-worker.js").catch((error) => {
+  navigator.serviceWorker.register(`./service-worker.js?v=${APP_VERSION}`).catch((error) => {
     console.warn("Service worker registration failed", error);
   });
 }
