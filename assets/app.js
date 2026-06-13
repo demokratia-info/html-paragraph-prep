@@ -487,7 +487,7 @@ function bindEvents() {
     saveStateSoon();
   });
 
-  dom.copyResultButton.addEventListener("click", () => copyText(dom.llmResultInput.value, "Result copied."));
+  dom.copyResultButton.addEventListener("click", copyHtmlAndMarkExported);
   dom.exportedCheckbox.addEventListener("change", () => {
     setExportedFromCheckbox().catch((error) => {
       showToast(error.message || "Could not save export marker.");
@@ -501,6 +501,7 @@ function bindEvents() {
     });
   });
   dom.toggleDirectionButton?.addEventListener("click", togglePreviewDirection);
+  dom.preview.addEventListener("click", openPreviewLinkInNewTab, true);
 }
 
 async function loginWithPassword(password) {
@@ -888,7 +889,7 @@ function render() {
   const html = previewHtmlForDraft(draft);
   dom.htmlOutput.value = html;
   dom.preview.dir = draft.direction || "auto";
-  dom.preview.innerHTML = html || "<p></p>";
+  renderPreviewHtml(html);
   renderStatus();
   renderSources();
 }
@@ -1325,7 +1326,7 @@ function clearOutputForRegeneration(draft) {
   draft.htmlCreatedAt = "";
   dom.llmResultInput.value = "";
   dom.htmlOutput.value = "";
-  dom.preview.innerHTML = "<p></p>";
+  renderPreviewHtml("");
 }
 
 async function saveResultText() {
@@ -1358,7 +1359,7 @@ function createHtmlFromResult(showMessage = true) {
   draft.html = html;
   draft.htmlCreatedAt = new Date().toISOString();
   dom.htmlOutput.value = html;
-  dom.preview.innerHTML = html;
+  renderPreviewHtml(html);
   touchDraft(draft);
   renderStatus();
   saveStateSoon();
@@ -1367,14 +1368,25 @@ function createHtmlFromResult(showMessage = true) {
 }
 
 async function copyHtmlAndMarkExported() {
-  if (!dom.htmlOutput.value && !createHtmlFromResult(false)) return;
-  const copied = await copyText(dom.htmlOutput.value, "HTML copied.");
+  const draft = activeDraft();
+  setResultFromEditor(draft);
+  const html = makeCmsHtml(draft.result || "");
+  if (!html) {
+    showToast("Add result text first.");
+    return;
+  }
+
+  draft.html = html;
+  draft.htmlCreatedAt = new Date().toISOString();
+  dom.htmlOutput.value = html;
+  renderPreviewHtml(html);
+
+  const copied = await copyText(html, "HTML copied.");
   if (!copied) return;
 
-  const draft = activeDraft();
-  draft.html = dom.htmlOutput.value;
   markExported(draft);
   draft.processingError = "";
+  touchDraft(draft);
   clearPersistentError();
   renderStatus();
   renderDraftNavigation();
@@ -1716,7 +1728,7 @@ function renderSharedOutputFields() {
   syncFieldUnlessFocused(dom.llmResultInput, draft.result || "");
   syncFieldUnlessFocused(dom.htmlOutput, html);
   if (document.activeElement !== dom.htmlOutput) {
-    dom.preview.innerHTML = html || "<p></p>";
+    renderPreviewHtml(html);
   }
 }
 
@@ -1776,12 +1788,38 @@ function updateHtml(shouldSave = true) {
   draft.html = html;
   draft.htmlCreatedAt = html ? new Date().toISOString() : "";
   dom.htmlOutput.value = html;
-  dom.preview.innerHTML = html || "<p></p>";
+  renderPreviewHtml(html);
   if (shouldSave) {
     touchDraft(draft);
     saveStateSoon();
   }
   return html;
+}
+
+function renderPreviewHtml(html) {
+  dom.preview.innerHTML = html || "<p></p>";
+  ensurePreviewLinksOpenInNewTabs();
+}
+
+function ensurePreviewLinksOpenInNewTabs() {
+  dom.preview.querySelectorAll("a[href]").forEach((link) => {
+    link.setAttribute("target", "_blank");
+    link.setAttribute("rel", "noopener noreferrer");
+  });
+}
+
+function openPreviewLinkInNewTab(event) {
+  const target = event.target?.nodeType === Node.ELEMENT_NODE
+    ? event.target
+    : event.target?.parentElement;
+  const link = target?.closest?.("a[href]");
+  if (!link || !dom.preview.contains(link)) return;
+
+  event.preventDefault();
+  link.target = "_blank";
+  link.rel = "noopener noreferrer";
+  const opened = window.open(link.href, "_blank", "noopener,noreferrer");
+  if (!opened) showToast("Browser blocked opening the link.");
 }
 
 function previewHtmlForDraft(draft) {
@@ -1841,7 +1879,7 @@ function sanitizeNode(node) {
   if (tag === "a") {
     const href = sanitizeHref(node.getAttribute("href") || "");
     if (!href) return children;
-    return `<a href="${escapeAttribute(href)}">${children}</a>`;
+    return linkHtml(href, children);
   }
   return `<${tag}>${children}</${tag}>`;
 }
@@ -1889,11 +1927,15 @@ function formatInline(value) {
   let escaped = escapeHtml(value);
   escaped = escaped.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (match, label, url) => {
     const href = sanitizeHref(url.replace(/&amp;/g, "&"));
-    return href ? `<a href="${escapeAttribute(href)}">${label}</a>` : label;
+    return href ? linkHtml(href, label) : label;
   });
   escaped = escaped.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
   escaped = escaped.replace(/\*([^*]+)\*/g, "<em>$1</em>");
   return escaped;
+}
+
+function linkHtml(href, children) {
+  return `<a href="${escapeAttribute(href)}" target="_blank" rel="noopener noreferrer">${children}</a>`;
 }
 
 function stripMarkdownFence(value) {

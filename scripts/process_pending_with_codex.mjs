@@ -587,7 +587,7 @@ function looksLikeHtml(value) {
 }
 
 function sanitizeGeneratedHtml(html) {
-  return String(html || "")
+  const sanitized = String(html || "")
     .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, "")
     .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, "")
     .replace(/\s+on[a-z]+\s*=\s*"[^"]*"/gi, "")
@@ -595,6 +595,18 @@ function sanitizeGeneratedHtml(html) {
     .replace(/\s+on[a-z]+\s*=\s*[^\s>]+/gi, "")
     .replace(/\s+href\s*=\s*(['"])\s*javascript:[\s\S]*?\1/gi, "")
     .trim();
+  return ensureBlankAnchorTargets(sanitized);
+}
+
+function ensureBlankAnchorTargets(html) {
+  return String(html || "").replace(/<a\b([^>]*)>/gi, (match, attrs) => {
+    if (!/\bhref\s*=/i.test(attrs)) return match;
+    const normalizedAttrs = attrs
+      .replace(/\s+target\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, "")
+      .replace(/\s+rel\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, "")
+      .trim();
+    return `<a${normalizedAttrs ? ` ${normalizedAttrs}` : ""} target="_blank" rel="noopener noreferrer">`;
+  });
 }
 
 function markdownishToHtml(text) {
@@ -640,11 +652,15 @@ function formatInline(value) {
   let escaped = escapeHtml(value);
   escaped = escaped.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (match, label, url) => {
     const href = sanitizeHref(url.replace(/&amp;/g, "&"));
-    return href ? `<a href="${escapeAttribute(href)}">${label}</a>` : label;
+    return href ? linkHtml(href, label) : label;
   });
   escaped = escaped.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
   escaped = escaped.replace(/\*([^*]+)\*/g, "<em>$1</em>");
   return escaped;
+}
+
+function linkHtml(href, children) {
+  return `<a href="${escapeAttribute(href)}" target="_blank" rel="noopener noreferrer">${children}</a>`;
 }
 
 function sanitizeHref(href) {
