@@ -807,9 +807,49 @@ function saveSharedState(payload, message) {
     version: payload.version || 1,
     app: payload.app || "summary-html-desk",
     updatedAt: new Date().toISOString(),
-    drafts: Array.isArray(payload.drafts) ? payload.drafts : []
+    drafts: Array.isArray(payload.drafts) ? payload.drafts.map(compactDraftForStorage) : []
   };
   githubPutContent(STATE_PATH, Buffer.from(JSON.stringify(nextPayload), "utf8").toString("base64"), message);
+}
+
+function compactDraftForStorage(draft) {
+  const next = { ...draft };
+  next.sources = Array.isArray(next.sources) ? next.sources.map(compactSourceForStorage) : [];
+
+  for (const key of [
+    "prompt",
+    "promptSource",
+    "regenerationBaseResult",
+    "html",
+    "htmlCreatedAt",
+    "exportedAt",
+    "processingStartedAt",
+    "processingRunId",
+    "processingError",
+    "direction"
+  ]) {
+    if (!next[key] || next[key] === "auto") delete next[key];
+  }
+
+  for (const key of ["language", "shape", "paragraphCount", "tone", "includeLinks"]) {
+    delete next[key];
+  }
+  if (next.editedAfterGeneration === false) delete next.editedAfterGeneration;
+  return next;
+}
+
+function compactSourceForStorage(source) {
+  const next = { ...source };
+  for (const key of ["text", "remoteFilePath"]) {
+    if (!next[key]) delete next[key];
+  }
+  for (const key of ["size"]) {
+    if (!next[key]) delete next[key];
+  }
+  for (const key of ["textAvailable", "fileAvailable", "fileStored"]) {
+    if (next[key] === false) delete next[key];
+  }
+  return next;
 }
 
 function githubGetContent(remotePath) {

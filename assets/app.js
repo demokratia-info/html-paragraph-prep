@@ -4,7 +4,7 @@ const STORAGE_KEY = "summary-html-desk.drafts.v1";
 const SETTINGS_KEY = "summary-html-desk.settings.v1";
 const DB_NAME = "summary-html-desk";
 const DB_VERSION = 1;
-const APP_VERSION = "20260613-6";
+const APP_VERSION = "20260613-7";
 const DEFAULT_BACKEND_ENDPOINT = "https://summary-html-desk-openai.demokratia-info.workers.dev";
 const PASSWORD_SESSION_KEY = "summary-html-desk.editor-password.session";
 const PASSWORD_STORAGE_KEY = "summary-html-desk.editor-password.local";
@@ -1746,8 +1746,9 @@ function syncFieldUnlessFocused(field, value) {
 }
 
 function draftForRemote(draft) {
-  return {
+  const remote = {
     ...draft,
+    prompt: promptForStorage(draft.prompt),
     html: "",
     htmlCreatedAt: "",
     sources: draft.sources.map((source) => ({
@@ -1757,6 +1758,42 @@ function draftForRemote(draft) {
       remoteFilePath: source.remoteFilePath || ""
     }))
   };
+  return compactDraftForRemote(remote);
+}
+
+function compactDraftForRemote(draft) {
+  for (const key of [
+    "prompt",
+    "promptSource",
+    "regenerationBaseResult",
+    "html",
+    "htmlCreatedAt",
+    "exportedAt",
+    "processingStartedAt",
+    "processingRunId",
+    "processingError",
+    "direction"
+  ]) {
+    if (!draft[key] || draft[key] === "auto") delete draft[key];
+  }
+  for (const key of ["language", "shape", "paragraphCount", "tone", "includeLinks"]) {
+    delete draft[key];
+  }
+  if (draft.editedAfterGeneration === false) delete draft.editedAfterGeneration;
+  draft.sources = draft.sources.map(compactSourceForRemote);
+  return draft;
+}
+
+function compactSourceForRemote(source) {
+  const next = { ...source };
+  for (const key of ["text", "remoteFilePath"]) {
+    if (!next[key]) delete next[key];
+  }
+  if (!next.size) delete next.size;
+  for (const key of ["textAvailable", "fileAvailable", "fileStored"]) {
+    if (next[key] === false) delete next[key];
+  }
+  return next;
 }
 
 function sourceForRemoteFile(source) {
