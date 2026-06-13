@@ -187,8 +187,8 @@ async function saveSharedState(payload, env) {
 
 async function loadSharedState(env) {
   const config = githubConfig(env);
-  const item = await githubGetContent(config, sharedStatePath(config));
-  if (!item?.content) {
+  const text = await githubGetTextContent(config, sharedStatePath(config));
+  if (!text) {
     return {
       version: 1,
       app: "summary-html-desk",
@@ -196,20 +196,23 @@ async function loadSharedState(env) {
       drafts: []
     };
   }
-  return JSON.parse(base64ToUtf8(item.content));
+  return JSON.parse(text);
 }
 
 async function loadDefaultPrompt(env) {
   const config = githubConfig(env);
   const item = await githubGetContent(config, defaultPromptPath(config));
+  const prompt = item?.content
+    ? base64ToUtf8(item.content).trim()
+    : String(await githubGetTextContent(config, defaultPromptPath(config)) || "").trim();
   if (!item?.content) {
     return {
-      prompt: "",
+      prompt,
       updatedAt: null
     };
   }
   return {
-    prompt: base64ToUtf8(item.content).trim(),
+    prompt,
     updatedAt: item.committer?.date || null
   };
 }
@@ -340,6 +343,28 @@ async function githubGetContent(config, path) {
   return payload;
 }
 
+async function githubGetTextContent(config, path) {
+  const item = await githubGetContent(config, path);
+  if (!item) return "";
+  if (item.content) return base64ToUtf8(item.content);
+
+  const response = await fetch(githubContentUrl(config, path, true), {
+    headers: githubHeaders(config, "application/vnd.github.raw")
+  });
+  if (response.status === 404) return "";
+  const text = await response.text();
+  if (!response.ok) {
+    let payload = {};
+    try {
+      payload = JSON.parse(text);
+    } catch {
+      payload = { message: text };
+    }
+    throw httpError(githubErrorMessage(payload, response.status), response.status);
+  }
+  return text;
+}
+
 async function githubGetRepo(config) {
   const response = await fetch(`https://api.github.com/repos/${encodeURIComponent(config.owner)}/${encodeURIComponent(config.repo)}`, {
     headers: githubHeaders(config)
@@ -379,9 +404,9 @@ function githubContentUrl(config, path, includeRef) {
   return url.toString();
 }
 
-function githubHeaders(config) {
+function githubHeaders(config, accept = "application/vnd.github+json") {
   return {
-    "Accept": "application/vnd.github+json",
+    "Accept": accept,
     "Authorization": `Bearer ${config.token}`,
     "Content-Type": "application/json",
     "User-Agent": "summary-html-desk-worker",

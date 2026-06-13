@@ -186,17 +186,12 @@ function existingSourceKeys(drafts) {
 }
 
 function loadDefaultPrompt() {
-  const item = githubGetContent(DEFAULT_PROMPT_PATH);
-  if (item?.content) {
-    return Buffer.from(stripBase64Whitespace(item.content), "base64").toString("utf8").trim();
-  }
-  return "";
+  return String(githubGetTextContent(DEFAULT_PROMPT_PATH) || "").trim();
 }
 
 function loadSharedState() {
-  const item = githubGetContent(STATE_PATH);
-  if (!item?.content) return null;
-  return JSON.parse(Buffer.from(stripBase64Whitespace(item.content), "base64").toString("utf8"));
+  const text = githubGetTextContent(STATE_PATH);
+  return text ? JSON.parse(text) : null;
 }
 
 function saveSharedState(payload, message) {
@@ -215,6 +210,20 @@ function githubGetContent(remotePath) {
   const result = runGh(["--method", "GET", "-H", "Accept: application/vnd.github+json", endpoint], { allow404: true });
   if (!result) return null;
   return JSON.parse(result);
+}
+
+function githubGetTextContent(remotePath) {
+  const item = githubGetContent(remotePath);
+  if (!item) return "";
+  if (item.content) {
+    return Buffer.from(stripBase64Whitespace(item.content), "base64").toString("utf8");
+  }
+  return githubGetRaw(remotePath).toString("utf8");
+}
+
+function githubGetRaw(remotePath) {
+  const endpoint = `${contentEndpoint(remotePath)}?ref=${encodeURIComponent(GITHUB_BRANCH)}`;
+  return runGh(["--method", "GET", "-H", "Accept: application/vnd.github.raw", endpoint], { raw: true });
 }
 
 function githubPutContent(remotePath, base64Content, message) {
@@ -239,12 +248,12 @@ function runGh(args, options = {}) {
   const result = spawnSync(GH_BIN, ["api", ...args], {
     cwd: REPO_ROOT,
     input: options.input,
-    encoding: "utf8",
+    encoding: options.raw ? null : "utf8",
     maxBuffer: 100 * 1024 * 1024
   });
   if (result.error) throw result.error;
   if (result.status !== 0) {
-    const stderr = String(result.stderr || "");
+    const stderr = Buffer.isBuffer(result.stderr) ? result.stderr.toString("utf8") : String(result.stderr || "");
     if (options.allow404 && /HTTP 404|Not Found/i.test(stderr)) return null;
     throw new Error(stderr.trim() || `gh api exited with status ${result.status}`);
   }

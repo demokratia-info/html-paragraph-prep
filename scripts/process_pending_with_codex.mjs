@@ -84,10 +84,7 @@ function syncDefaultPrompt() {
 }
 
 function loadRequiredDefaultPrompt() {
-  const item = githubGetContent(DEFAULT_PROMPT_PATH);
-  const prompt = item?.content
-    ? Buffer.from(stripBase64Whitespace(item.content), "base64").toString("utf8").trim()
-    : "";
+  const prompt = String(githubGetTextContent(DEFAULT_PROMPT_PATH) || "").trim();
   if (!prompt) {
     throw new Error(`Default prompt is missing or empty in ${DATA_REPO}/${DEFAULT_PROMPT_PATH}.`);
   }
@@ -760,9 +757,9 @@ function finalizeDraft(draftId, runId, updateDraft, message) {
 }
 
 function loadSharedState() {
-  const item = githubGetContent(STATE_PATH);
-  if (!item?.content) return null;
-  const payload = JSON.parse(Buffer.from(stripBase64Whitespace(item.content), "base64").toString("utf8"));
+  const text = githubGetTextContent(STATE_PATH);
+  if (!text) return null;
+  const payload = JSON.parse(text);
   if (!Array.isArray(payload.drafts)) payload.drafts = [];
   return payload;
 }
@@ -783,6 +780,15 @@ function githubGetContent(remotePath) {
   const result = runGh(["--method", "GET", "-H", "Accept: application/vnd.github+json", endpoint], { allow404: true });
   if (!result) return null;
   return JSON.parse(result);
+}
+
+function githubGetTextContent(remotePath) {
+  const item = githubGetContent(remotePath);
+  if (!item) return "";
+  if (item.content) {
+    return Buffer.from(stripBase64Whitespace(item.content), "base64").toString("utf8");
+  }
+  return githubGetRaw(remotePath).toString("utf8");
 }
 
 function githubGetRaw(remotePath) {
