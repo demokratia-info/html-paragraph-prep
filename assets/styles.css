@@ -179,6 +179,11 @@ summary {
   max-height: none;
 }
 
+.panel-source {
+  gap: 10px;
+  overflow-y: auto;
+}
+
 .panel-heading {
   display: flex;
   align-items: flex-start;
@@ -373,14 +378,14 @@ textarea:focus {
 .source-entry {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 8px;
 }
 
 .drop-zone {
   display: grid;
-  min-height: 102px;
+  min-height: 72px;
   place-items: center;
-  gap: 8px;
+  gap: 4px;
   border: 1px dashed var(--line-strong);
   border-radius: var(--radius);
   background: #fbfcfd;
@@ -396,13 +401,13 @@ textarea:focus {
 
 .drop-icon {
   display: grid;
-  width: 40px;
-  height: 40px;
+  width: 32px;
+  height: 32px;
   place-items: center;
   border-radius: 8px;
   background: #fff;
   color: var(--primary);
-  font-size: 24px;
+  font-size: 20px;
 }
 
 .source-list {
@@ -411,7 +416,7 @@ textarea:focus {
   gap: 8px;
   flex: 0 1 auto;
   min-height: 0;
-  max-height: 120px;
+  max-height: 92px;
   overflow: auto;
 }
 
@@ -420,13 +425,18 @@ textarea:focus {
 }
 
 .prompt-field {
-  flex: 1;
-  min-height: 150px;
+  flex: 1 1 auto;
+  min-height: 0;
 }
 
 .prompt-field textarea {
   flex: 1;
-  min-height: 150px;
+  min-height: 120px;
+}
+
+#pushBackendButton {
+  flex: 0 0 auto;
+  max-width: 100%;
 }
 
 .draft-browser {
