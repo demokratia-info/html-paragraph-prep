@@ -4,7 +4,7 @@ const STORAGE_KEY = "summary-html-desk.drafts.v1";
 const SETTINGS_KEY = "summary-html-desk.settings.v1";
 const DB_NAME = "summary-html-desk";
 const DB_VERSION = 1;
-const APP_VERSION = "20260615-2";
+const APP_VERSION = "20260615-3";
 const DEFAULT_BACKEND_ENDPOINT = "https://summary-api.demokratia.trade";
 const SESSION_TOKEN_SESSION_KEY = "summary-html-desk.session-token.session";
 const SESSION_TOKEN_STORAGE_KEY = "summary-html-desk.session-token.local";
@@ -89,6 +89,7 @@ const dom = {
   manageUsersButton: $("#manageUsersButton"),
   logoutButton: $("#logoutButton"),
   draftTitleInput: $("#draftTitleInput"),
+  copySourceTitleButton: $("#copySourceTitleButton"),
   targetHtmlTitleInput: $("#targetHtmlTitleInput"),
   copyTargetHtmlTitleButton: $("#copyTargetHtmlTitleButton"),
   draftSelect: $("#draftSelect"),
@@ -478,6 +479,7 @@ function bindEvents() {
     renderDraftBrowser();
     saveStateSoon();
   });
+  dom.copySourceTitleButton.addEventListener("click", copySourceTitle);
 
   dom.targetHtmlTitleInput.addEventListener("input", () => {
     const draft = activeDraft();
@@ -1771,6 +1773,16 @@ async function copyHtmlAndMarkExported() {
     doneMessage: "HTML copied and item marked exported.",
     toastMessage: "HTML copied and saved."
   });
+}
+
+async function copySourceTitle() {
+  const draft = activeDraft();
+  const value = String(dom.draftTitleInput.value || draft.title || "").trim();
+  if (!value) {
+    showToast("Source title is empty.");
+    return;
+  }
+  await copyText(value, "Source title copied.");
 }
 
 async function copyTargetHtmlTitle() {
