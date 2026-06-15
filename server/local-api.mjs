@@ -18,6 +18,7 @@ import {
   saveDefaultPrompt,
   saveSharedState,
   saveSourceFile,
+  updateUser,
   userFromSessionToken
 } from "./postgres-storage.mjs";
 
@@ -90,6 +91,13 @@ app.post("/", async (request, response) => {
             password: payload.password,
             isAdmin: payload.isAdmin
           }),
+          users: await listUsers()
+        });
+      case "updateUser":
+        requireAdmin(user);
+        return response.json({
+          updatedUser: await updateUser(payload.userId, updateUserPayload(payload)),
+          currentUser: await userFromSessionToken(sessionTokenFromRequest(request)),
           users: await listUsers()
         });
       case "deleteUser":
@@ -184,6 +192,13 @@ async function requireUser(request) {
 
 function requireAdmin(user) {
   if (!user?.isAdmin) throw httpError("Admin permission is required.", 403);
+}
+
+function updateUserPayload(payload) {
+  const updates = {};
+  if (Object.prototype.hasOwnProperty.call(payload, "password")) updates.password = payload.password;
+  if (Object.prototype.hasOwnProperty.call(payload, "isAdmin")) updates.isAdmin = payload.isAdmin;
+  return updates;
 }
 
 function sessionTokenFromRequest(request) {

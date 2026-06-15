@@ -931,6 +931,29 @@ textarea:focus {
   font-size: 12px;
 }
 
+.user-management-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.user-admin-toggle {
+  min-height: 38px;
+  white-space: nowrap;
+}
+
+.user-password-reset {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: min(360px, 42vw);
+}
+
+.user-password-reset input {
+  min-width: 140px;
+}
+
 .visually-hidden {
   position: absolute;
   width: 1px;
@@ -996,5 +1019,12 @@ textarea:focus {
   .user-management-row {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .user-management-actions,
+  .user-password-reset {
+    align-items: stretch;
+    flex-direction: column;
+    width: 100%;
   }
 }

@@ -4,7 +4,7 @@ const STORAGE_KEY = "summary-html-desk.drafts.v1";
 const SETTINGS_KEY = "summary-html-desk.settings.v1";
 const DB_NAME = "summary-html-desk";
 const DB_VERSION = 1;
-const APP_VERSION = "20260614-5";
+const APP_VERSION = "20260615-1";
 const DEFAULT_BACKEND_ENDPOINT = "https://summary-api.demokratia.trade";
 const SESSION_TOKEN_SESSION_KEY = "summary-html-desk.session-token.session";
 const SESSION_TOKEN_STORAGE_KEY = "summary-html-desk.session-token.local";
@@ -826,6 +826,33 @@ function renderUserManagement() {
       ].join(" · ");
       details.append(name, meta);
 
+      const actions = document.createElement("div");
+      actions.className = "user-management-actions";
+
+      const adminToggle = document.createElement("label");
+      adminToggle.className = "check-row user-admin-toggle";
+      const adminCheckbox = document.createElement("input");
+      adminCheckbox.type = "checkbox";
+      adminCheckbox.checked = Boolean(user.isAdmin);
+      adminCheckbox.addEventListener("change", () => updateUserAdminFromDialog(user, adminCheckbox.checked));
+      const adminText = document.createElement("span");
+      adminText.textContent = "Admin";
+      adminToggle.append(adminCheckbox, adminText);
+
+      const passwordBox = document.createElement("div");
+      passwordBox.className = "user-password-reset";
+      const passwordInput = document.createElement("input");
+      passwordInput.type = "password";
+      passwordInput.autocomplete = "new-password";
+      passwordInput.placeholder = "New password";
+      passwordInput.setAttribute("aria-label", `New password for ${user.username}`);
+      const passwordButton = document.createElement("button");
+      passwordButton.type = "button";
+      passwordButton.className = "button secondary";
+      passwordButton.textContent = "Set Password";
+      passwordButton.addEventListener("click", () => updateUserPasswordFromDialog(user, passwordInput, passwordButton));
+      passwordBox.append(passwordInput, passwordButton);
+
       const remove = document.createElement("button");
       remove.type = "button";
       remove.className = "button danger";
@@ -833,7 +860,8 @@ function renderUserManagement() {
       remove.disabled = user.id === state.currentUser?.id;
       remove.addEventListener("click", () => deleteUserFromDialog(user));
 
-      row.append(details, remove);
+      actions.append(adminToggle, passwordBox, remove);
+      row.append(details, actions);
       return row;
     })
   );
@@ -869,6 +897,46 @@ async function addUserFromDialog() {
   }
 }
 
+async function updateUserAdminFromDialog(user, isAdmin) {
+  if (!user) return;
+  try {
+    const payload = await backendPost({
+      action: "updateUser",
+      userId: user.id,
+      isAdmin
+    });
+    applyUserManagementPayload(payload);
+    setUserManagementStatus(`${user.username} updated.`);
+  } catch (error) {
+    renderUserManagement();
+    setUserManagementStatus(error.message || "Could not update user.");
+  }
+}
+
+async function updateUserPasswordFromDialog(user, input, button) {
+  const password = input.value;
+  if (!password) {
+    setUserManagementStatus("Enter a new password.");
+    return;
+  }
+
+  button.disabled = true;
+  try {
+    const payload = await backendPost({
+      action: "updateUser",
+      userId: user.id,
+      password
+    });
+    applyUserManagementPayload(payload);
+    input.value = "";
+    setUserManagementStatus(`${user.username} password updated.`);
+  } catch (error) {
+    setUserManagementStatus(error.message || "Could not update password.");
+  } finally {
+    button.disabled = false;
+  }
+}
+
 async function deleteUserFromDialog(user) {
   if (!user || user.id === state.currentUser?.id) return;
   if (!window.confirm(`Delete user "${user.username}"? Their sources will move to your admin user.`)) return;
@@ -885,6 +953,17 @@ async function deleteUserFromDialog(user) {
     setUserManagementStatus("User deleted.");
   } catch (error) {
     setUserManagementStatus(error.message || "Could not delete user.");
+  }
+}
+
+function applyUserManagementPayload(payload) {
+  if (Array.isArray(payload?.users)) state.users = payload.users;
+  if (payload?.currentUser) state.currentUser = payload.currentUser;
+  if (state.currentUser?.isAdmin) {
+    renderUserAccess();
+  } else {
+    closeUserManagement();
+    renderUserAccess();
   }
 }
 

@@ -222,6 +222,63 @@ export async function createUser({ username, password, isAdmin = false } = {}) {
   return publicUser(result.rows[0]);
 }
 
+export async function updateUser(userId, updates = {}) {
+  await initDatabase();
+  const id = String(userId || "").trim();
+  if (!id) throw httpError("Missing user id.", 400);
+
+  const passwordWasProvided = Object.prototype.hasOwnProperty.call(updates, "password");
+  const cleanPassword = String(updates.password || "");
+  if (passwordWasProvided && cleanPassword.length < 6) {
+    throw httpError("Use a password with at least 6 characters.", 400);
+  }
+  const adminWasProvided = Object.prototype.hasOwnProperty.call(updates, "isAdmin");
+
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+    const targetResult = await client.query(
+      `
+        SELECT id, username, username_key, password_hash, is_admin, created_at, updated_at
+        FROM app_users
+        WHERE id = $1
+        FOR UPDATE
+      `,
+      [id]
+    );
+    const target = targetResult.rows[0];
+    if (!target) throw httpError("User was not found.", 404);
+
+    const nextIsAdmin = adminWasProvided ? Boolean(updates.isAdmin) : Boolean(target.is_admin);
+    if (target.is_admin && !nextIsAdmin) {
+      const adminCount = await client.query("SELECT count(*)::int AS count FROM app_users WHERE is_admin = true");
+      if (Number(adminCount.rows[0]?.count || 0) <= 1) {
+        throw httpError("Keep at least one admin user.", 400);
+      }
+    }
+
+    const nextPasswordHash = passwordWasProvided ? hashPassword(cleanPassword) : target.password_hash;
+    const updated = await client.query(
+      `
+        UPDATE app_users
+        SET password_hash = $2,
+            is_admin = $3,
+            updated_at = now()
+        WHERE id = $1
+        RETURNING id, username, username_key, is_admin, created_at, updated_at
+      `,
+      [id, nextPasswordHash, nextIsAdmin]
+    );
+    await client.query("COMMIT");
+    return publicUser(updated.rows[0]);
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
 export async function deleteUser(userId, actor) {
   await initDatabase();
   const id = String(userId || "").trim();
@@ -563,24 +620,10 @@ function normalizeDraftForStorage(draft) {
 }
 
 async function ensureInitialAdminUser() {
-  const usernameKey = usernameKeyFor(INITIAL_ADMIN_USERNAME);
-  const existing = await getPool().query(
-    "SELECT id, is_admin FROM app_users WHERE username_key = $1",
-    [usernameKey]
-  );
-  if (existing.rows[0]) {
-    if (!existing.rows[0].is_admin) {
-      await getPool().query(
-        "UPDATE app_users SET is_admin = true, updated_at = now() WHERE id = $1",
-        [existing.rows[0].id]
-      );
-    }
-    return;
-  }
-
   const userCount = await getPool().query("SELECT count(*)::int AS count FROM app_users");
   if (Number(userCount.rows[0]?.count || 0) > 0) return;
 
+  const usernameKey = usernameKeyFor(INITIAL_ADMIN_USERNAME);
   await getPool().query(
     `
       INSERT INTO app_users (id, username, username_key, password_hash, is_admin)
