@@ -108,6 +108,8 @@ export async function initDatabase() {
   await ensureInitialAdminUser();
   await assignUnownedDraftsToDefaultOwner();
   await cleanupExpiredSessions();
+  await ensureUniqueExistingTargetHtmlTitles();
+  await ensureTargetHtmlTitleUniqueIndex();
 }
 
 export async function loginUser(username, password) {
@@ -376,16 +378,18 @@ export async function saveSharedState(shared, options = {}) {
   const ownerUserId = normalizeOptionalId(options.ownerUserId);
   const scope = saveScopeForUser(user, ownerUserId);
   const ownerCache = new Map();
+  const drafts = shared.drafts.map(normalizeDraftForStorage);
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
-    const ids = [];
-    for (const rawDraft of shared.drafts) {
-      const draft = normalizeDraftForStorage(rawDraft);
+    const ids = drafts.map((draft) => draft.id);
+    const usedTargetHtmlTitles = await reservedTargetHtmlTitles(client, scope);
+    await clearTargetHtmlTitlesForSaveScope(client, scope);
+    for (const draft of drafts) {
       const owner = await resolveDraftOwner(draft, { user, scope, client, ownerCache });
       draft.ownerUserId = owner?.id || "";
       draft.ownerUsername = owner?.username || "";
-      ids.push(draft.id);
+      draft.targetHtmlTitle = uniqueTargetHtmlTitle(draft.targetHtmlTitle, usedTargetHtmlTitles);
       await client.query(
         `
           INSERT INTO drafts (
@@ -684,6 +688,48 @@ async function cleanupExpiredSessions() {
   await getPool().query("DELETE FROM app_sessions WHERE expires_at <= now()");
 }
 
+async function ensureUniqueExistingTargetHtmlTitles() {
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+    const result = await client.query(`
+      SELECT id, target_html_title
+      FROM drafts
+      WHERE target_html_title <> ''
+      ORDER BY target_html_title ASC, updated_at DESC, id ASC
+      FOR UPDATE
+    `);
+    const used = new Set();
+    for (const row of result.rows) {
+      const next = uniqueTargetHtmlTitle(row.target_html_title, used);
+      if (next === row.target_html_title) continue;
+      await client.query(
+        `
+          UPDATE drafts
+          SET target_html_title = $2,
+              payload = jsonb_set(payload, '{targetHtmlTitle}', to_jsonb($2::text), true)
+          WHERE id = $1
+        `,
+        [row.id, next]
+      );
+    }
+    await client.query("COMMIT");
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+async function ensureTargetHtmlTitleUniqueIndex() {
+  await getPool().query(`
+    CREATE UNIQUE INDEX IF NOT EXISTS drafts_target_html_title_unique_idx
+      ON drafts (target_html_title)
+      WHERE target_html_title <> '';
+  `);
+}
+
 function publicUser(row) {
   if (!row) return null;
   return {
@@ -709,6 +755,66 @@ function saveScopeForUser(user, ownerUserId) {
   if (user.isAdmin && ownerUserId) return { mode: "owner", ownerId: ownerUserId };
   if (user.isAdmin) return { mode: "global", ownerId: "" };
   return { mode: "owner", ownerId: user.id };
+}
+
+async function reservedTargetHtmlTitles(client, scope) {
+  if (scope.mode !== "owner") return new Set();
+  const result = await client.query(
+    `
+      SELECT target_html_title
+      FROM drafts
+      WHERE target_html_title <> ''
+        AND owner_user_id IS DISTINCT FROM $1
+      FOR UPDATE
+    `,
+    [scope.ownerId]
+  );
+  return new Set(result.rows.map((row) => String(row.target_html_title || "").toLowerCase()));
+}
+
+async function clearTargetHtmlTitlesForSaveScope(client, scope) {
+  const where = scope.mode === "owner" ? "WHERE owner_user_id = $1" : "";
+  const params = scope.mode === "owner" ? [scope.ownerId] : [];
+  await client.query(
+    `
+      UPDATE drafts
+      SET target_html_title = '',
+          payload = payload - 'targetHtmlTitle'
+      ${where}
+    `,
+    params
+  );
+}
+
+function uniqueTargetHtmlTitle(value, used) {
+  const clean = normalizeTargetHtmlTitle(value);
+  if (!clean) return "";
+
+  let candidate = trimTargetHtmlTitle(clean, 40);
+  let suffixNumber = 2;
+  while (used.has(candidate.toLowerCase())) {
+    const suffix = `-${suffixNumber}`;
+    candidate = `${trimTargetHtmlTitle(clean, 40 - suffix.length)}${suffix}`;
+    suffixNumber += 1;
+  }
+  used.add(candidate.toLowerCase());
+  return candidate;
+}
+
+function normalizeTargetHtmlTitle(value) {
+  if (!String(value || "").trim()) return "";
+  return String(value || "")
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/&/g, " and ")
+    .replace(/[^a-zA-Z0-9]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .toLowerCase();
+}
+
+function trimTargetHtmlTitle(value, maxLength) {
+  return String(value || "").slice(0, maxLength).replace(/-+$/g, "") || "source";
 }
 
 async function resolveDraftOwner(draft, context) {
