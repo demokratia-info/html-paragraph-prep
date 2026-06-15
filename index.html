@@ -8,7 +8,7 @@
     <meta name="description" content="A private GitHub Pages workspace for turning source material into CMS-ready HTML summaries.">
     <link rel="manifest" href="./manifest.webmanifest">
     <link rel="icon" href="./assets/favicon.svg" type="image/svg+xml">
-    <link rel="stylesheet" href="./assets/styles.css?v=20260615-4">
+    <link rel="stylesheet" href="./assets/styles.css?v=20260615-5">
   </head>
   <body>
     <section class="login-screen" id="loginScreen" aria-labelledby="loginTitle" hidden>
@@ -95,23 +95,27 @@
           <input id="draftSearchInput" type="search" autocomplete="off" spellcheck="true">
         </label>
 
-        <label class="field">
-          <span>Status</span>
-          <select id="draftStatusFilterInput">
-            <option value="all">All</option>
-            <option value="ready-export">Ready to export</option>
-            <option value="pending">Waiting</option>
-            <option value="processing">Processing</option>
-            <option value="draft">Drafts</option>
-            <option value="error">Needs attention</option>
-            <option value="exported">Exported</option>
-          </select>
-        </label>
+        <div class="filter-row">
+          <label class="field">
+            <span>Status</span>
+            <select id="draftStatusFilterInput">
+              <option value="all">All</option>
+              <option value="ready-export">Ready to export</option>
+              <option value="pending">Waiting</option>
+              <option value="processing">Processing</option>
+              <option value="draft">Drafts</option>
+              <option value="error">Needs attention</option>
+              <option value="exported">Exported</option>
+            </select>
+          </label>
 
-        <label class="field" id="ownerFilterField" hidden>
-          <span>User</span>
-          <select id="ownerFilterInput"></select>
-        </label>
+          <label class="field" id="ownerFilterField" hidden>
+            <span>User</span>
+            <select id="ownerFilterInput"></select>
+          </label>
+        </div>
+
+        <p class="filter-count" id="draftFilterCount" aria-live="polite"></p>
 
         <div class="draft-browser" id="draftBrowser" aria-live="polite"></div>
       </section>
@@ -318,6 +322,6 @@
     </dialog>
 
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
-    <script src="./assets/app.js?v=20260615-4" defer></script>
+    <script src="./assets/app.js?v=20260615-5" defer></script>
   </body>
 </html>

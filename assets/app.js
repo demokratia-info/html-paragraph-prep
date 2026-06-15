@@ -97,6 +97,7 @@ const dom = {
   draftStatusFilterInput: $("#draftStatusFilterInput"),
   ownerFilterField: $("#ownerFilterField"),
   ownerFilterInput: $("#ownerFilterInput"),
+  draftFilterCount: $("#draftFilterCount"),
   draftBrowser: $("#draftBrowser"),
   backendEndpointInput: $("#backendEndpointInput"),
   saveBackendButton: $("#saveBackendButton"),
@@ -1309,6 +1310,7 @@ function renderDraftSelect() {
 
 function renderDraftBrowser() {
   const visibleDrafts = filteredDrafts();
+  renderDraftFilterCount(visibleDrafts.length);
   if (!visibleDrafts.length) {
     const empty = document.createElement("div");
     empty.className = "draft-card empty";
@@ -1362,6 +1364,13 @@ function renderDraftBrowser() {
       return button;
     })
   );
+}
+
+function renderDraftFilterCount(visibleCount) {
+  if (!dom.draftFilterCount) return;
+  const totalCount = state.drafts.length;
+  const sourceLabel = visibleCount === 1 ? "source" : "sources";
+  dom.draftFilterCount.textContent = `${visibleCount} filtered ${sourceLabel} (${totalCount} total)`;
 }
 
 function renderDraftNavigation() {
