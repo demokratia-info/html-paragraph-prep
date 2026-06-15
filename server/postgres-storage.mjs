@@ -62,6 +62,9 @@ export async function initDatabase() {
     ALTER TABLE drafts
       ADD COLUMN IF NOT EXISTS owner_user_id text REFERENCES app_users(id) ON DELETE SET NULL;
 
+    ALTER TABLE drafts
+      ADD COLUMN IF NOT EXISTS target_html_title text NOT NULL DEFAULT '';
+
     CREATE INDEX IF NOT EXISTS drafts_status_updated_idx
       ON drafts (status, updated_at DESC);
 
@@ -222,7 +225,7 @@ export async function createUser({ username, password, isAdmin = false } = {}) {
   return publicUser(result.rows[0]);
 }
 
-export async function updateUser(userId, updates = {}) {
+export async function updateUser(userId, updates = {}, actor = null) {
   await initDatabase();
   const id = String(userId || "").trim();
   if (!id) throw httpError("Missing user id.", 400);
@@ -250,6 +253,9 @@ export async function updateUser(userId, updates = {}) {
     if (!target) throw httpError("User was not found.", 404);
 
     const nextIsAdmin = adminWasProvided ? Boolean(updates.isAdmin) : Boolean(target.is_admin);
+    if (actor?.id === id && target.is_admin && !nextIsAdmin) {
+      throw httpError("You cannot remove your own admin permission.", 400);
+    }
     if (target.is_admin && !nextIsAdmin) {
       const adminCount = await client.query("SELECT count(*)::int AS count FROM app_users WHERE is_admin = true");
       if (Number(adminCount.rows[0]?.count || 0) <= 1) {
@@ -343,7 +349,7 @@ export async function loadSharedState(options = {}) {
 
   const [draftsResult, meta] = await Promise.all([
     getPool().query(`
-      SELECT d.payload, d.owner_user_id, u.username AS owner_username
+      SELECT d.payload, d.owner_user_id, d.target_html_title, u.username AS owner_username
       FROM drafts d
       LEFT JOIN app_users u ON u.id = d.owner_user_id
       ${where}
@@ -383,9 +389,9 @@ export async function saveSharedState(shared, options = {}) {
       await client.query(
         `
           INSERT INTO drafts (
-            id, payload, title, status, created_at, updated_at, queued_at, processed_at, exported_at, owner_user_id
+            id, payload, title, status, created_at, updated_at, queued_at, processed_at, exported_at, owner_user_id, target_html_title
           )
-          VALUES ($1, $2::jsonb, $3, $4, $5, $6, $7, $8, $9, $10)
+          VALUES ($1, $2::jsonb, $3, $4, $5, $6, $7, $8, $9, $10, $11)
           ON CONFLICT (id) DO UPDATE SET
             payload = EXCLUDED.payload,
             title = EXCLUDED.title,
@@ -395,7 +401,8 @@ export async function saveSharedState(shared, options = {}) {
             queued_at = EXCLUDED.queued_at,
             processed_at = EXCLUDED.processed_at,
             exported_at = EXCLUDED.exported_at,
-            owner_user_id = EXCLUDED.owner_user_id
+            owner_user_id = EXCLUDED.owner_user_id,
+            target_html_title = EXCLUDED.target_html_title
         `,
         [
           draft.id,
@@ -407,7 +414,8 @@ export async function saveSharedState(shared, options = {}) {
           timestampOrNull(draft.queuedAt),
           timestampOrNull(draft.processedAt),
           timestampOrNull(draft.exportedAt),
-          draft.ownerUserId || null
+          draft.ownerUserId || null,
+          String(draft.targetHtmlTitle || "")
         ]
       );
     }
@@ -615,6 +623,7 @@ function normalizeDraftForStorage(draft) {
     id,
     sources: Array.isArray(draft.sources) ? draft.sources : [],
     status: normalizeStatus(draft.status),
+    targetHtmlTitle: String(draft.targetHtmlTitle || "").trim(),
     updatedAt: draft.updatedAt || new Date().toISOString()
   };
 }
@@ -691,6 +700,7 @@ function draftPayloadWithOwner(row) {
   const payload = row?.payload && typeof row.payload === "object" ? { ...row.payload } : {};
   payload.ownerUserId = row.owner_user_id || payload.ownerUserId || "";
   payload.ownerUsername = row.owner_username || payload.ownerUsername || "";
+  payload.targetHtmlTitle = row.target_html_title || payload.targetHtmlTitle || "";
   return payload;
 }
 

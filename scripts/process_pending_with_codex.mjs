@@ -34,6 +34,7 @@ const OCR_LANGS = String(process.env.OCR_LANGS || "heb+eng").trim() || "heb+eng"
 const OCR_PSM = String(process.env.OCR_PSM || "6").trim() || "6";
 const DEFAULT_DRAFT_TITLES = new Set(["", "מקור חדש", "מורק חדש", "New paper", "Untitled summary", "CMS summary"]);
 const TITLE_MAX_CHARS = 90;
+const TARGET_HTML_TITLE_MAX_CHARS = 40;
 const PROCESSING_ROOT = path.join(REPO_ROOT, ".codex-processing");
 const GH_BIN = commandPath("gh");
 const CODEX_BIN = commandPath("codex");
@@ -146,10 +147,12 @@ async function processDraft(draft) {
     const resultText = readResultText(resultPath);
     if (!resultText) throw new Error("Codex finished without returning summary text.");
     const derivedTitle = deriveTitleFromSources(preparedSources);
+    const targetHtmlTitle = generateTargetHtmlTitle(draftInState, preparedSources, resultText, workDir);
 
     await finalizeDraft(draft.id, runId, (freshDraft) => {
       const processedAt = new Date().toISOString();
       freshDraft.result = resultText;
+      freshDraft.targetHtmlTitle = targetHtmlTitle;
       freshDraft.regenerationBaseResult = "";
       freshDraft.html = "";
       freshDraft.htmlCreatedAt = "";
@@ -311,6 +314,99 @@ function isDateLikeTitleLine(value) {
   const monthNames = "ינואר|פברואר|מרץ|אפריל|מאי|יוני|יולי|אוגוסט|ספטמבר|אוקטובר|נובמבר|דצמבר";
   const wordCount = value.split(/\s+/).filter(Boolean).length;
   return wordCount <= 4 && new RegExp(`\\d.*(${monthNames})|(${monthNames}).*\\d`).test(value);
+}
+
+function generateTargetHtmlTitle(draft, sources, resultText, workDir) {
+  const fallback = fallbackTargetHtmlTitle(draft, sources, resultText);
+  const resultPath = path.join(workDir, "target-html-title.txt");
+  const prompt = [
+    "Create one concise English target HTML title for this summary.",
+    `Maximum ${TARGET_HTML_TITLE_MAX_CHARS} characters.`,
+    "Use only ASCII letters, numbers, and hyphens.",
+    "Do not use spaces. Replace spaces with hyphens.",
+    "Do not use quotes, markdown, punctuation other than hyphens, or explanatory text.",
+    "Prefer a useful short title over a literal translation.",
+    "",
+    `Current item title: ${draft.title || "Untitled summary"}`,
+    "",
+    "Source labels:",
+    (sources || []).map((source) => `- ${source.title || source.filename || source.url || "Untitled"}`).join("\n") || "- None",
+    "",
+    "Generated summary:",
+    clipText(resultText, 5000)
+  ].join("\n");
+
+  try {
+    runCodex(prompt, resultPath);
+    return normalizeTargetHtmlTitle(readResultText(resultPath)) || fallback;
+  } catch (error) {
+    log(`Target HTML title generation failed for ${draft.id}: ${error?.message || String(error)}`);
+    return fallback;
+  }
+}
+
+function fallbackTargetHtmlTitle(draft, sources, resultText) {
+  const text = [
+    draft?.title,
+    ...(sources || []).flatMap((source) => [source.title, source.filename, source.url]),
+    resultText
+  ].filter(Boolean).join(" ");
+  const mapped = englishKeywordTitle(text);
+  if (mapped) return mapped;
+  return normalizeTargetHtmlTitle(draft?.title || "summary") || "summary";
+}
+
+function englishKeywordTitle(text) {
+  const value = String(text || "");
+  const words = [];
+  const matches = [
+    [/הוועדה לבחירת שופטים|בחירת שופטים/, "judicial-selection"],
+    [/עילת הסבירות|סבירות/, "reasonableness"],
+    [/פסקת ההתגברות|התגברות/, "override-clause"],
+    [/ייעוץ משפטי|יועצים משפטיים|היועצים המשפטיים/, "legal-advisers"],
+    [/ביקורת שיפוטית/, "judicial-review"],
+    [/חוק יסוד/, "basic-law"],
+    [/הצעת חוק/, "bill"],
+    [/בית המשפט|בג[\"״']?ץ|הרשות השופטת/, "judiciary"],
+    [/דמוקרט|ליברל/, "democracy"],
+    [/זכויות/, "rights"],
+    [/שוויון/, "equality"],
+    [/חוות דעת|חוו[\"״']ד/, "opinion"],
+    [/נייר עמדה/, "position-paper"],
+    [/רפורמה משפטית|מערכת המשפט/, "judicial-reform"]
+  ];
+
+  for (const [pattern, word] of matches) {
+    if (pattern.test(value) && !words.includes(word)) words.push(word);
+    if (words.join("-").length >= TARGET_HTML_TITLE_MAX_CHARS) break;
+  }
+  return words.length ? normalizeTargetHtmlTitle(words.join("-")) : "";
+}
+
+function normalizeTargetHtmlTitle(value) {
+  const firstLine = stripMarkdownFence(String(value || ""))
+    .split(/\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)[0] || "";
+  const withoutLabel = firstLine
+    .replace(/^target\s+html\s+title\s*[:：-]\s*/i, "")
+    .replace(/^title\s*[:：-]\s*/i, "")
+    .replace(/^["'`]+|["'`.]+$/g, "");
+  const ascii = withoutLabel
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/&/g, " and ")
+    .replace(/[^a-zA-Z0-9]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .toLowerCase();
+  if (!/[a-z]/.test(ascii)) return "";
+  return trimSlugToLength(ascii, TARGET_HTML_TITLE_MAX_CHARS);
+}
+
+function trimSlugToLength(value, maxLength) {
+  const text = String(value || "").slice(0, maxLength).replace(/-+$/g, "");
+  return text || "";
 }
 
 function downloadUrlSource(source, index, workDir) {

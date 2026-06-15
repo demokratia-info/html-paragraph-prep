@@ -96,7 +96,7 @@ app.post("/", async (request, response) => {
       case "updateUser":
         requireAdmin(user);
         return response.json({
-          updatedUser: await updateUser(payload.userId, updateUserPayload(payload)),
+          updatedUser: await updateUser(payload.userId, updateUserPayload(payload), user),
           currentUser: await userFromSessionToken(sessionTokenFromRequest(request)),
           users: await listUsers()
         });

@@ -258,6 +258,12 @@ textarea#htmlOutput {
   line-height: 1.5;
 }
 
+.copy-field-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+}
+
 input:focus,
 select:focus,
 textarea:focus {

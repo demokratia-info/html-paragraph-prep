@@ -4,7 +4,7 @@ const STORAGE_KEY = "summary-html-desk.drafts.v1";
 const SETTINGS_KEY = "summary-html-desk.settings.v1";
 const DB_NAME = "summary-html-desk";
 const DB_VERSION = 1;
-const APP_VERSION = "20260615-1";
+const APP_VERSION = "20260615-2";
 const DEFAULT_BACKEND_ENDPOINT = "https://summary-api.demokratia.trade";
 const SESSION_TOKEN_SESSION_KEY = "summary-html-desk.session-token.session";
 const SESSION_TOKEN_STORAGE_KEY = "summary-html-desk.session-token.local";
@@ -89,6 +89,8 @@ const dom = {
   manageUsersButton: $("#manageUsersButton"),
   logoutButton: $("#logoutButton"),
   draftTitleInput: $("#draftTitleInput"),
+  targetHtmlTitleInput: $("#targetHtmlTitleInput"),
+  copyTargetHtmlTitleButton: $("#copyTargetHtmlTitleButton"),
   draftSelect: $("#draftSelect"),
   draftSearchInput: $("#draftSearchInput"),
   draftStatusFilterInput: $("#draftStatusFilterInput"),
@@ -163,6 +165,7 @@ function createDraft(title = DEFAULT_DRAFT_TITLE) {
     ...DEFAULT_SUMMARY_OPTIONS,
     prompt: "",
     result: "",
+    targetHtmlTitle: "",
     regenerationBaseResult: "",
     html: "",
     direction: "auto",
@@ -247,6 +250,7 @@ function normalizeDraft(draft) {
   normalized.editedAfterGeneration = Boolean(normalized.editedAfterGeneration);
   normalized.processingError = normalized.processingError || "";
   normalized.processingRunId = normalized.processingRunId || "";
+  normalized.targetHtmlTitle = normalizeTargetHtmlTitle(normalized.targetHtmlTitle || "");
   normalized.ownerUserId = normalized.ownerUserId || "";
   normalized.ownerUsername = normalized.ownerUsername || "";
   Object.assign(normalized, DEFAULT_SUMMARY_OPTIONS);
@@ -474,6 +478,18 @@ function bindEvents() {
     renderDraftBrowser();
     saveStateSoon();
   });
+
+  dom.targetHtmlTitleInput.addEventListener("input", () => {
+    const draft = activeDraft();
+    const normalized = normalizeTargetHtmlTitle(dom.targetHtmlTitleInput.value);
+    if (dom.targetHtmlTitleInput.value !== normalized) {
+      dom.targetHtmlTitleInput.value = normalized;
+    }
+    draft.targetHtmlTitle = normalized;
+    touchDraft(draft);
+    saveStateSoon();
+  });
+  dom.copyTargetHtmlTitleButton.addEventListener("click", copyTargetHtmlTitle);
 
   dom.exportDraftsButton.addEventListener("click", exportDrafts);
   dom.importDraftsInput.addEventListener("change", importDrafts);
@@ -834,6 +850,10 @@ function renderUserManagement() {
       const adminCheckbox = document.createElement("input");
       adminCheckbox.type = "checkbox";
       adminCheckbox.checked = Boolean(user.isAdmin);
+      adminCheckbox.disabled = user.id === state.currentUser?.id;
+      if (adminCheckbox.disabled) {
+        adminToggle.title = "You cannot remove your own admin permission.";
+      }
       adminCheckbox.addEventListener("change", () => updateUserAdminFromDialog(user, adminCheckbox.checked));
       const adminText = document.createElement("span");
       adminText.textContent = "Admin";
@@ -1221,6 +1241,7 @@ function render() {
   renderDraftSelect();
   renderDraftBrowser();
   dom.draftTitleInput.value = draft.title;
+  dom.targetHtmlTitleInput.value = draft.targetHtmlTitle || "";
   dom.draftSearchInput.value = state.draftSearch;
   dom.draftStatusFilterInput.value = state.draftStatusFilter;
   dom.promptOutput.value = promptTextForDisplay(draft.prompt);
@@ -1381,6 +1402,7 @@ function draftSearchHaystack(draft) {
   ].filter(Boolean).join(" ")).join(" ");
   return [
     draft.title,
+    draft.targetHtmlTitle,
     draft.prompt,
     draft.result,
     draft.html,
@@ -1751,6 +1773,20 @@ async function copyHtmlAndMarkExported() {
   });
 }
 
+async function copyTargetHtmlTitle() {
+  const draft = activeDraft();
+  const value = normalizeTargetHtmlTitle(dom.targetHtmlTitleInput.value || draft.targetHtmlTitle || "");
+  if (!value) {
+    showToast("Target HTML title is empty.");
+    return;
+  }
+  draft.targetHtmlTitle = value;
+  dom.targetHtmlTitleInput.value = value;
+  touchDraft(draft);
+  saveStateSoon();
+  await copyText(value, "Target HTML title copied.");
+}
+
 async function setExportedFromCheckbox() {
   const draft = activeDraft();
   if (dom.exportedCheckbox.checked) {
@@ -2051,6 +2087,7 @@ function mergeActiveDraftFromRemote(localDraft, remoteDraft) {
     "processingRunId",
     "processingError",
     "processedAt",
+    "targetHtmlTitle",
     "exportedAt",
     "htmlCreatedAt",
     "regenerationBaseResult",
@@ -2123,6 +2160,7 @@ function renderSharedOutputFields() {
   const draft = activeDraft();
   const html = previewHtmlForDraft(draft);
   syncFieldUnlessFocused(dom.draftTitleInput, draft.title || "");
+  syncFieldUnlessFocused(dom.targetHtmlTitleInput, draft.targetHtmlTitle || "");
   if (isDefaultPromptText(draft.prompt)) {
     syncFieldUnlessFocused(dom.promptOutput, buildPrompt());
   }
@@ -2678,6 +2716,24 @@ function slugify(value) {
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "")
     .slice(0, 60) || "summary";
+}
+
+function normalizeTargetHtmlTitle(value) {
+  if (!String(value || "").trim()) return "";
+  const ascii = String(value || "")
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/&/g, " and ")
+    .replace(/[^a-zA-Z0-9]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .toLowerCase();
+  return trimSlugToLength(ascii, 40);
+}
+
+function trimSlugToLength(value, maxLength) {
+  const text = String(value || "").slice(0, maxLength).replace(/-+$/g, "");
+  return text || "";
 }
 
 function cleanPathPart(value) {
