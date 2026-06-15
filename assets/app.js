@@ -4,7 +4,7 @@ const STORAGE_KEY = "summary-html-desk.drafts.v1";
 const SETTINGS_KEY = "summary-html-desk.settings.v1";
 const DB_NAME = "summary-html-desk";
 const DB_VERSION = 1;
-const APP_VERSION = "20260615-4";
+const APP_VERSION = "20260615-6";
 const DEFAULT_BACKEND_ENDPOINT = "https://summary-api.demokratia.trade";
 const SESSION_TOKEN_SESSION_KEY = "summary-html-desk.session-token.session";
 const SESSION_TOKEN_STORAGE_KEY = "summary-html-desk.session-token.local";
@@ -2782,9 +2782,29 @@ function safeRemoteFilename(value) {
 function registerServiceWorker() {
   if (!("serviceWorker" in navigator)) return;
   if (!["http:", "https:"].includes(window.location.protocol)) return;
-  navigator.serviceWorker.register(`./service-worker.js?v=${APP_VERSION}`).catch((error) => {
-    console.warn("Service worker registration failed", error);
-  });
+  const hadController = Boolean(navigator.serviceWorker.controller);
+  const updateReloadKey = `summary-html-desk.update-reload.${APP_VERSION}`;
+  let updateReloadStarted = false;
+  const reloadForServiceWorkerUpdate = () => {
+    if (!hadController || updateReloadStarted || sessionStorage.getItem(updateReloadKey)) return;
+    updateReloadStarted = true;
+    sessionStorage.setItem(updateReloadKey, "1");
+    window.location.reload();
+  };
+  navigator.serviceWorker.addEventListener("controllerchange", reloadForServiceWorkerUpdate);
+  navigator.serviceWorker
+    .register(`./service-worker.js?v=${APP_VERSION}`, { updateViaCache: "none" })
+    .then((registration) => {
+      const checkForUpdate = () => registration.update().catch(() => {});
+      checkForUpdate();
+      window.addEventListener("focus", checkForUpdate);
+      document.addEventListener("visibilitychange", () => {
+        if (document.visibilityState === "visible") checkForUpdate();
+      });
+    })
+    .catch((error) => {
+      console.warn("Service worker registration failed", error);
+    });
 }
 
 async function init() {
