@@ -4,7 +4,7 @@ const STORAGE_KEY = "summary-html-desk.drafts.v1";
 const SETTINGS_KEY = "summary-html-desk.settings.v1";
 const DB_NAME = "summary-html-desk";
 const DB_VERSION = 1;
-const APP_VERSION = "20260615-6";
+const APP_VERSION = "20260619-1";
 const DEFAULT_BACKEND_ENDPOINT = "https://summary-api.demokratia.trade";
 const SESSION_TOKEN_SESSION_KEY = "summary-html-desk.session-token.session";
 const SESSION_TOKEN_STORAGE_KEY = "summary-html-desk.session-token.local";
@@ -133,6 +133,7 @@ const dom = {
   runProxyButton: $("#runProxyButton"),
   llmResultInput: $("#llmResultInput"),
   copyResultButton: $("#copyResultButton"),
+  reviewedCheckbox: $("#reviewedCheckbox"),
   exportedCheckbox: $("#exportedCheckbox"),
   refreshHtmlButton: $("#refreshHtmlButton"),
   copyHtmlButton: $("#copyHtmlButton"),
@@ -175,6 +176,7 @@ function createDraft(title = DEFAULT_DRAFT_TITLE) {
     queuedAt: "",
     processingStartedAt: "",
     processedAt: "",
+    reviewed: false,
     exportedAt: "",
     htmlCreatedAt: "",
     editedAfterGeneration: false,
@@ -246,6 +248,7 @@ function normalizeDraft(draft) {
   normalized.queuedAt = normalized.queuedAt || "";
   normalized.processingStartedAt = normalized.processingStartedAt || "";
   normalized.processedAt = normalized.processedAt || "";
+  normalized.reviewed = normalized.reviewed === true;
   normalized.exportedAt = normalized.exportedAt || "";
   normalized.htmlCreatedAt = normalized.htmlCreatedAt || "";
   normalized.regenerationBaseResult = normalized.regenerationBaseResult || "";
@@ -551,6 +554,11 @@ function bindEvents() {
   });
 
   dom.copyResultButton.addEventListener("click", copyHtmlAndMarkExported);
+  dom.reviewedCheckbox.addEventListener("change", () => {
+    setReviewedFromCheckbox().catch((error) => {
+      showToast(error.message || "Could not save review marker.");
+    });
+  });
   dom.exportedCheckbox.addEventListener("change", () => {
     setExportedFromCheckbox().catch((error) => {
       showToast(error.message || "Could not save export marker.");
@@ -1017,6 +1025,7 @@ function setResultFromEditor(draft) {
   const changed = String(draft.result || "") !== String(nextResult || "");
   draft.result = nextResult;
   if (!changed) return false;
+  clearReviewMarker(draft);
   clearExportMarker(draft);
   if (String(nextResult || "").trim()) draft.regenerationBaseResult = "";
   if (draft.processedAt) draft.editedAfterGeneration = true;
@@ -1027,6 +1036,11 @@ function clearExportMarker(draft) {
   draft.exportedAt = "";
   if (String(draft.status || "").trim() === "exported") draft.status = "done";
   if (dom.exportedCheckbox) dom.exportedCheckbox.checked = false;
+}
+
+function clearReviewMarker(draft) {
+  draft.reviewed = false;
+  if (dom.reviewedCheckbox) dom.reviewedCheckbox.checked = false;
 }
 
 function markExported(draft) {
@@ -1273,6 +1287,7 @@ function renderStatus() {
   dom.modifiedTime.textContent = formatDateTime(draft.updatedAt);
   dom.processedTime.textContent = draft.processedAt ? formatDateTime(draft.processedAt) : "Not yet";
   dom.exportedTime.textContent = draft.exportedAt ? formatDateTime(draft.exportedAt) : "Not yet";
+  dom.reviewedCheckbox.checked = draft.reviewed === true;
   dom.exportedCheckbox.checked = isDraftExported(draft);
   renderProcessingButtonLabel(draft);
 }
@@ -1837,6 +1852,19 @@ async function setExportedFromCheckbox() {
   });
 }
 
+async function setReviewedFromCheckbox() {
+  const draft = activeDraft();
+  draft.reviewed = Boolean(dom.reviewedCheckbox.checked);
+  touchDraft(draft);
+  await saveState();
+
+  await pushBackendSync({
+    busyMessage: "Saving review marker...",
+    doneMessage: draft.reviewed ? "Summary marked as reviewed." : "Summary marked as not reviewed.",
+    toastMessage: draft.reviewed ? "Marked reviewed." : "Review marker cleared."
+  });
+}
+
 async function runProxySummary() {
   const draft = activeDraft();
   if (!backendEndpoint()) {
@@ -2109,12 +2137,13 @@ function mergeActiveDraftFromRemote(localDraft, remoteDraft) {
     "processingError",
     "processedAt",
     "targetHtmlTitle",
+    "reviewed",
     "exportedAt",
     "htmlCreatedAt",
     "regenerationBaseResult",
     "editedAfterGeneration"
   ].forEach((field) => {
-    merged[field] = field === "editedAfterGeneration" ? Boolean(remoteDraft[field]) : remoteDraft[field] || "";
+    merged[field] = ["editedAfterGeneration", "reviewed"].includes(field) ? remoteDraft[field] === true : remoteDraft[field] || "";
   });
 
   if (shouldUseRemoteResult(localDraft, remoteDraft)) {

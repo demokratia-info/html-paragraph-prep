@@ -147,6 +147,7 @@ function createDraftFromRow(row, timestamp) {
     queuedAt: timestamp,
     processingStartedAt: "",
     processedAt: "",
+    reviewed: false,
     exportedAt: "",
     htmlCreatedAt: "",
     editedAfterGeneration: false,

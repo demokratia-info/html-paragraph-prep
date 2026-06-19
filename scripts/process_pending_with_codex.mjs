@@ -156,6 +156,7 @@ async function processDraft(draft) {
       freshDraft.regenerationBaseResult = "";
       freshDraft.html = "";
       freshDraft.htmlCreatedAt = "";
+      freshDraft.reviewed = false;
       freshDraft.exportedAt = "";
       freshDraft.editedAfterGeneration = false;
       if (shouldReplaceDraftTitle(freshDraft.title) && derivedTitle) {
@@ -949,6 +950,7 @@ async function saveSharedState(payload, message) {
 function compactDraftForStorage(draft) {
   const next = { ...draft };
   next.sources = Array.isArray(next.sources) ? next.sources.map(compactSourceForStorage) : [];
+  next.reviewed = next.reviewed === true;
 
   for (const key of [
     "prompt",

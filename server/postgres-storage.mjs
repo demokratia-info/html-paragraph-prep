@@ -65,6 +65,9 @@ export async function initDatabase() {
     ALTER TABLE drafts
       ADD COLUMN IF NOT EXISTS target_html_title text NOT NULL DEFAULT '';
 
+    ALTER TABLE drafts
+      ADD COLUMN IF NOT EXISTS reviewed boolean NOT NULL DEFAULT false;
+
     CREATE INDEX IF NOT EXISTS drafts_status_updated_idx
       ON drafts (status, updated_at DESC);
 
@@ -351,7 +354,7 @@ export async function loadSharedState(options = {}) {
 
   const [draftsResult, meta] = await Promise.all([
     getPool().query(`
-      SELECT d.payload, d.owner_user_id, d.target_html_title, u.username AS owner_username
+      SELECT d.payload, d.owner_user_id, d.target_html_title, d.reviewed, u.username AS owner_username
       FROM drafts d
       LEFT JOIN app_users u ON u.id = d.owner_user_id
       ${where}
@@ -393,9 +396,9 @@ export async function saveSharedState(shared, options = {}) {
       await client.query(
         `
           INSERT INTO drafts (
-            id, payload, title, status, created_at, updated_at, queued_at, processed_at, exported_at, owner_user_id, target_html_title
+            id, payload, title, status, created_at, updated_at, queued_at, processed_at, exported_at, owner_user_id, target_html_title, reviewed
           )
-          VALUES ($1, $2::jsonb, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+          VALUES ($1, $2::jsonb, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
           ON CONFLICT (id) DO UPDATE SET
             payload = EXCLUDED.payload,
             title = EXCLUDED.title,
@@ -406,7 +409,8 @@ export async function saveSharedState(shared, options = {}) {
             processed_at = EXCLUDED.processed_at,
             exported_at = EXCLUDED.exported_at,
             owner_user_id = EXCLUDED.owner_user_id,
-            target_html_title = EXCLUDED.target_html_title
+            target_html_title = EXCLUDED.target_html_title,
+            reviewed = EXCLUDED.reviewed
         `,
         [
           draft.id,
@@ -419,7 +423,8 @@ export async function saveSharedState(shared, options = {}) {
           timestampOrNull(draft.processedAt),
           timestampOrNull(draft.exportedAt),
           draft.ownerUserId || null,
-          String(draft.targetHtmlTitle || "")
+          String(draft.targetHtmlTitle || ""),
+          draft.reviewed === true
         ]
       );
     }
@@ -628,6 +633,7 @@ function normalizeDraftForStorage(draft) {
     sources: Array.isArray(draft.sources) ? draft.sources : [],
     status: normalizeStatus(draft.status),
     targetHtmlTitle: String(draft.targetHtmlTitle || "").trim(),
+    reviewed: draft.reviewed === true,
     updatedAt: draft.updatedAt || new Date().toISOString()
   };
 }
@@ -747,6 +753,7 @@ function draftPayloadWithOwner(row) {
   payload.ownerUserId = row.owner_user_id || payload.ownerUserId || "";
   payload.ownerUsername = row.owner_username || payload.ownerUsername || "";
   payload.targetHtmlTitle = row.target_html_title || payload.targetHtmlTitle || "";
+  payload.reviewed = row.reviewed === true;
   return payload;
 }
 

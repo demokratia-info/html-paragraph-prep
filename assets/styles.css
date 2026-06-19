@@ -239,6 +239,19 @@ summary {
   font-weight: 650;
 }
 
+.checkbox-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+
+.checkbox-row label {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
 input,
 select,
 textarea {
@@ -588,13 +601,6 @@ textarea:focus {
 .check-row input {
   width: 18px;
   min-height: 18px;
-}
-
-.export-check {
-  justify-content: flex-start;
-  color: var(--ink);
-  font-size: 13px;
-  font-weight: 750;
 }
 
 .edited-marker {

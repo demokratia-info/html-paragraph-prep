@@ -8,7 +8,7 @@
     <meta name="description" content="A private GitHub Pages workspace for turning source material into CMS-ready HTML summaries.">
     <link rel="manifest" href="./manifest.webmanifest">
     <link rel="icon" href="./assets/favicon.svg" type="image/svg+xml">
-    <link rel="stylesheet" href="./assets/styles.css?v=20260615-6">
+    <link rel="stylesheet" href="./assets/styles.css?v=20260619-1">
   </head>
   <body>
     <section class="login-screen" id="loginScreen" aria-labelledby="loginTitle" hidden>
@@ -249,10 +249,16 @@
           <pre id="errorText"></pre>
         </div>
 
-        <label class="check-row export-check">
-          <input id="exportedCheckbox" type="checkbox">
-          <span>Summary was exported</span>
-        </label>
+        <div class="check-row checkbox-row">
+          <label>
+            <input id="reviewedCheckbox" type="checkbox">
+            <span>Reviewed</span>
+          </label>
+          <label>
+            <input id="exportedCheckbox" type="checkbox">
+            <span>Exported</span>
+          </label>
+        </div>
 
         <label class="field grow result-field">
           <span class="visually-hidden">Result</span>
@@ -322,6 +328,6 @@
     </dialog>
 
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
-    <script src="./assets/app.js?v=20260615-6" defer></script>
+    <script src="./assets/app.js?v=20260619-1" defer></script>
   </body>
 </html>
