@@ -4,7 +4,7 @@ const STORAGE_KEY = "summary-html-desk.drafts.v1";
 const SETTINGS_KEY = "summary-html-desk.settings.v1";
 const DB_NAME = "summary-html-desk";
 const DB_VERSION = 1;
-const APP_VERSION = "20260619-2";
+const APP_VERSION = "20260619-3";
 const DEFAULT_BACKEND_ENDPOINT = "https://summary-api.demokratia.trade";
 const SESSION_TOKEN_SESSION_KEY = "summary-html-desk.session-token.session";
 const SESSION_TOKEN_STORAGE_KEY = "summary-html-desk.session-token.local";
@@ -94,6 +94,7 @@ const dom = {
   loginError: $("#loginError"),
   appHeader: $("#appHeader"),
   app: $("#app"),
+  currentUserLabel: $("#currentUserLabel"),
   manageUsersButton: $("#manageUsersButton"),
   logoutButton: $("#logoutButton"),
   draftTitleInput: $("#draftTitleInput"),
@@ -771,6 +772,9 @@ function hideLoginError() {
 
 function renderUserAccess() {
   const isAdmin = Boolean(state.currentUser?.isAdmin);
+  if (dom.currentUserLabel) {
+    dom.currentUserLabel.textContent = state.currentUser?.username ? `User: ${state.currentUser.username}` : "";
+  }
   if (dom.manageUsersButton) dom.manageUsersButton.hidden = !isAdmin;
   if (dom.ownerFilterField) dom.ownerFilterField.hidden = !isAdmin;
   if (dom.saveDefaultPromptButton) dom.saveDefaultPromptButton.hidden = !isAdmin;

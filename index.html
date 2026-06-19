@@ -8,7 +8,7 @@
     <meta name="description" content="A private GitHub Pages workspace for turning source material into CMS-ready HTML summaries.">
     <link rel="manifest" href="./manifest.webmanifest">
     <link rel="icon" href="./assets/favicon.svg" type="image/svg+xml">
-    <link rel="stylesheet" href="./assets/styles.css?v=20260619-2">
+    <link rel="stylesheet" href="./assets/styles.css?v=20260619-3">
   </head>
   <body>
     <section class="login-screen" id="loginScreen" aria-labelledby="loginTitle" hidden>
@@ -38,7 +38,10 @@
       <div class="brand">
         <img class="brand-mark" src="./assets/favicon.svg" width="40" height="40" alt="">
         <div>
-          <h1>Summary HTML Desk</h1>
+          <h1>
+            <span>Summary HTML Desk</span>
+            <span class="current-user-label" id="currentUserLabel"></span>
+          </h1>
           <p>Private source-to-CMS workspace</p>
         </div>
       </div>
@@ -329,6 +332,6 @@
     </dialog>
 
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
-    <script src="./assets/app.js?v=20260619-2" defer></script>
+    <script src="./assets/app.js?v=20260619-3" defer></script>
   </body>
 </html>

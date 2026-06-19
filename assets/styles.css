@@ -119,10 +119,24 @@ summary {
 }
 
 .brand h1 {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
   margin: 0;
   font-size: 20px;
   line-height: 1.1;
   letter-spacing: 0;
+}
+
+.current-user-label {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.current-user-label:empty {
+  display: none;
 }
 
 .brand p,
