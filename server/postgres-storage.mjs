@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import os from "node:os";
 import { Pool } from "pg";
 
 const DEFAULT_DATABASE = "html_paragraph_prep";
@@ -17,7 +18,8 @@ export function getPool() {
       ? new Pool({ connectionString: process.env.DATABASE_URL })
       : new Pool({
         host: DEFAULT_SOCKET_DIR,
-        database: DEFAULT_DATABASE
+        database: DEFAULT_DATABASE,
+        user: process.env.PGUSER || os.userInfo().username
       });
   }
   return pool;
