@@ -4,7 +4,7 @@ const STORAGE_KEY = "summary-html-desk.drafts.v1";
 const SETTINGS_KEY = "summary-html-desk.settings.v1";
 const DB_NAME = "summary-html-desk";
 const DB_VERSION = 1;
-const APP_VERSION = "20260619-1";
+const APP_VERSION = "20260619-2";
 const DEFAULT_BACKEND_ENDPOINT = "https://summary-api.demokratia.trade";
 const SESSION_TOKEN_SESSION_KEY = "summary-html-desk.session-token.session";
 const SESSION_TOKEN_STORAGE_KEY = "summary-html-desk.session-token.local";
@@ -41,6 +41,14 @@ const STATUS_TEXT = {
   done: {
     label: "Ready",
     detail: "Summary text is ready to edit"
+  },
+  reviewed: {
+    label: "Reviewed",
+    detail: "Summary was reviewed and is ready for export"
+  },
+  exported: {
+    label: "Exported",
+    detail: "Summary was exported"
   },
   error: {
     label: "Needs Attention",
@@ -1053,6 +1061,16 @@ function isDraftExported(draft) {
   return Boolean(draft?.exportedAt) || String(draft?.status || "").trim() === "exported";
 }
 
+function isDraftReviewed(draft) {
+  return draft?.reviewed === true && !isDraftExported(draft);
+}
+
+function displayStatusKey(draft) {
+  if (isDraftExported(draft)) return "exported";
+  if (isDraftReviewed(draft)) return "reviewed";
+  return normalizeStatus(draft?.status);
+}
+
 function hasEditedAfterGeneration(draft) {
   return Boolean(draft?.editedAfterGeneration);
 }
@@ -1279,7 +1297,7 @@ function render() {
 
 function renderStatus() {
   const draft = activeDraft();
-  const status = normalizeStatus(draft.status);
+  const status = displayStatusKey(draft);
   const text = STATUS_TEXT[status] || STATUS_TEXT.draft;
   dom.statusBadge.textContent = text.label;
   dom.statusBadge.className = `status-badge status-${status}`;
@@ -1316,7 +1334,7 @@ function renderDraftSelect() {
       const option = document.createElement("option");
       option.value = draft.id;
       const editedMarker = hasEditedAfterGeneration(draft) ? " *" : "";
-      option.textContent = `${draft.title || DEFAULT_DRAFT_TITLE}${editedMarker} · ${statusLabel(draft.status)} · ${draft.sources.length} sources`;
+      option.textContent = `${draft.title || DEFAULT_DRAFT_TITLE}${editedMarker} · ${statusLabel(draft)} · ${draft.sources.length} sources`;
       return option;
     })
   );
@@ -1358,8 +1376,8 @@ function renderDraftBrowser() {
         title.append(marker);
       }
       const badge = document.createElement("span");
-      badge.className = `status-badge status-${normalizeStatus(draft.status)}`;
-      badge.textContent = statusLabel(draft.status);
+      badge.className = `status-badge status-${displayStatusKey(draft)}`;
+      badge.textContent = statusLabel(draft);
       top.append(title, badge);
 
       const meta = document.createElement("p");
@@ -1406,17 +1424,22 @@ function filteredDrafts() {
 
 function draftMatchesStatusFilter(draft, filter) {
   const status = normalizeStatus(draft.status);
+  const displayStatus = displayStatusKey(draft);
   if (!filter || filter === "all") return true;
   if (filter === "ready-export") {
     return Boolean(String(draft.result || "").trim())
       && status !== "pending"
       && status !== "processing"
-      && !isDraftExported(draft);
+      && displayStatus !== "reviewed"
+      && displayStatus !== "exported";
+  }
+  if (filter === "reviewed") {
+    return displayStatus === "reviewed";
   }
   if (filter === "exported") {
-    return isDraftExported(draft);
+    return displayStatus === "exported";
   }
-  return status === filter;
+  return displayStatus === filter;
 }
 
 function draftSearchHaystack(draft) {
@@ -1856,6 +1879,8 @@ async function setReviewedFromCheckbox() {
   const draft = activeDraft();
   draft.reviewed = Boolean(dom.reviewedCheckbox.checked);
   touchDraft(draft);
+  renderStatus();
+  renderDraftNavigation();
   await saveState();
 
   await pushBackendSync({
@@ -2752,8 +2777,11 @@ function formatDateTime(value) {
   }).format(date);
 }
 
-function statusLabel(status) {
-  return (STATUS_TEXT[normalizeStatus(status)] || STATUS_TEXT.draft).label;
+function statusLabel(statusOrDraft) {
+  const status = statusOrDraft && typeof statusOrDraft === "object"
+    ? displayStatusKey(statusOrDraft)
+    : STATUS_TEXT[String(statusOrDraft || "")] ? String(statusOrDraft || "") : normalizeStatus(statusOrDraft);
+  return (STATUS_TEXT[status] || STATUS_TEXT.draft).label;
 }
 
 function clamp(value, min, max) {

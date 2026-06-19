@@ -678,6 +678,11 @@ textarea:focus {
   color: var(--primary-strong);
 }
 
+.status-reviewed {
+  background: #e8f8ee;
+  color: #166534;
+}
+
 .status-error {
   background: #fff4f2;
   color: var(--danger);
