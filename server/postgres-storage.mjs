@@ -70,6 +70,12 @@ export async function initDatabase() {
     ALTER TABLE drafts
       ADD COLUMN IF NOT EXISTS reviewed boolean NOT NULL DEFAULT false;
 
+    ALTER TABLE app_users
+      ADD COLUMN IF NOT EXISTS default_prompt text NOT NULL DEFAULT '';
+
+    ALTER TABLE app_users
+      ADD COLUMN IF NOT EXISTS default_prompt_updated_at timestamptz;
+
     CREATE INDEX IF NOT EXISTS drafts_status_updated_idx
       ON drafts (status, updated_at DESC);
 
@@ -111,6 +117,7 @@ export async function initDatabase() {
       ON app_sessions (expires_at);
   `);
   await ensureInitialAdminUser();
+  await ensureUserDefaultPrompts();
   await assignUnownedDraftsToDefaultOwner();
   await cleanupExpiredSessions();
   await ensureUniqueExistingTargetHtmlTitles();
@@ -217,13 +224,15 @@ export async function createUser({ username, password, isAdmin = false } = {}) {
   }
 
   const id = `user-${crypto.randomUUID()}`;
+  const defaultPrompt = await defaultPromptSeed();
+  const defaultPromptUpdatedAt = defaultPrompt ? new Date().toISOString() : null;
   const result = await getPool().query(
     `
-      INSERT INTO app_users (id, username, username_key, password_hash, is_admin)
-      VALUES ($1, $2, $3, $4, $5)
+      INSERT INTO app_users (id, username, username_key, password_hash, is_admin, default_prompt, default_prompt_updated_at)
+      VALUES ($1, $2, $3, $4, $5, $6, $7)
       RETURNING id, username, username_key, is_admin, created_at, updated_at
     `,
-    [id, cleanUsername, usernameKey, hashPassword(cleanPassword), Boolean(isAdmin)]
+    [id, cleanUsername, usernameKey, hashPassword(cleanPassword), Boolean(isAdmin), defaultPrompt, defaultPromptUpdatedAt]
   ).catch((error) => {
     if (error.code === "23505") throw httpError("A user with this username already exists.", 409);
     throw error;
@@ -464,25 +473,65 @@ export async function saveSharedState(shared, options = {}) {
   }
 }
 
-export async function loadDefaultPrompt({ localPromptFallback = "" } = {}) {
+export async function loadDefaultPrompt({ user = null, userId = "", localPromptFallback = "" } = {}) {
   await initDatabase();
-  const stored = await getSetting("defaultPrompt");
-  const prompt = String(stored?.prompt || localPromptFallback || "").trim();
+  const targetUserId = String(user?.id || userId || "").trim();
+  const stored = await globalDefaultPrompt(localPromptFallback);
+  let prompt = stored.prompt;
+  let updatedAt = stored.updatedAt;
+  if (targetUserId) {
+    const result = await getPool().query(
+      "SELECT default_prompt, default_prompt_updated_at FROM app_users WHERE id = $1",
+      [targetUserId]
+    );
+    const row = result.rows[0];
+    const userPrompt = String(row?.default_prompt || "").trim();
+    if (userPrompt) {
+      prompt = userPrompt;
+      updatedAt = row.default_prompt_updated_at ? new Date(row.default_prompt_updated_at).toISOString() : updatedAt;
+    }
+  }
   return {
     prompt,
-    updatedAt: stored?.updatedAt || null
+    updatedAt,
+    userId: targetUserId
   };
 }
 
-export async function saveDefaultPrompt(prompt) {
+export async function saveDefaultPrompt(prompt, { user = null, userId = "" } = {}) {
   const value = String(prompt || "").trim();
   if (!value) throw httpError("Default prompt cannot be empty.", 400);
+  await initDatabase();
   const updatedAt = new Date().toISOString();
+  const targetUserId = String(user?.id || userId || "").trim();
+  if (targetUserId) {
+    const result = await getPool().query(
+      `
+        UPDATE app_users
+        SET default_prompt = $2,
+            default_prompt_updated_at = $3,
+            updated_at = now()
+        WHERE id = $1
+        RETURNING id
+      `,
+      [targetUserId, value, updatedAt]
+    );
+    if (!result.rowCount) throw httpError("User was not found.", 404);
+    return {
+      ok: true,
+      prompt: value,
+      updatedAt,
+      userId: targetUserId
+    };
+  }
+
   await setSetting("defaultPrompt", { prompt: value, updatedAt });
+  await ensureUserDefaultPrompts();
   return {
     ok: true,
     prompt: value,
-    updatedAt
+    updatedAt,
+    userId: ""
   };
 }
 
@@ -644,19 +693,53 @@ async function ensureInitialAdminUser() {
   const userCount = await getPool().query("SELECT count(*)::int AS count FROM app_users");
   if (Number(userCount.rows[0]?.count || 0) > 0) return;
 
+  const defaultPrompt = await defaultPromptSeed();
+  const defaultPromptUpdatedAt = defaultPrompt ? new Date().toISOString() : null;
   const usernameKey = usernameKeyFor(INITIAL_ADMIN_USERNAME);
   await getPool().query(
     `
-      INSERT INTO app_users (id, username, username_key, password_hash, is_admin)
-      VALUES ($1, $2, $3, $4, true)
+      INSERT INTO app_users (id, username, username_key, password_hash, is_admin, default_prompt, default_prompt_updated_at)
+      VALUES ($1, $2, $3, $4, true, $5, $6)
     `,
     [
       `user-${usernameKey}`,
       INITIAL_ADMIN_USERNAME,
       usernameKey,
-      hashPassword(INITIAL_ADMIN_PASSWORD)
+      hashPassword(INITIAL_ADMIN_PASSWORD),
+      defaultPrompt,
+      defaultPromptUpdatedAt
     ]
   );
+}
+
+async function ensureUserDefaultPrompts() {
+  const defaultPrompt = await defaultPromptSeed();
+  if (!defaultPrompt) return;
+  await getPool().query(
+    `
+      UPDATE app_users
+      SET default_prompt = $1,
+          default_prompt_updated_at = COALESCE(default_prompt_updated_at, now())
+      WHERE default_prompt = ''
+    `,
+    [defaultPrompt]
+  );
+}
+
+async function defaultPromptSeed() {
+  return (await globalDefaultPrompt()).prompt;
+}
+
+async function globalDefaultPrompt(localPromptFallback = "") {
+  const result = await getPool().query(
+    "SELECT value FROM app_settings WHERE key = $1",
+    ["defaultPrompt"]
+  );
+  const stored = result.rows[0]?.value || null;
+  return {
+    prompt: String(stored?.prompt || localPromptFallback || "").trim(),
+    updatedAt: stored?.updatedAt || null
+  };
 }
 
 async function assignUnownedDraftsToDefaultOwner() {

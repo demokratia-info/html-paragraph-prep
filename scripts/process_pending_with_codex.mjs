@@ -102,9 +102,10 @@ async function syncDefaultPrompt() {
   log("Default prompt updated in shared storage.");
 }
 
-async function loadRequiredDefaultPrompt() {
+async function loadRequiredDefaultPrompt(draft = {}) {
+  const ownerUserId = String(draft.ownerUserId || "").trim();
   const prompt = STORAGE_BACKEND === "postgres"
-    ? String((await loadPostgresDefaultPrompt({ localPromptFallback: loadLocalPrompt() })).prompt || "").trim()
+    ? String((await loadPostgresDefaultPrompt({ userId: ownerUserId, localPromptFallback: loadLocalPrompt() })).prompt || "").trim()
     : String(githubGetTextContent(DEFAULT_PROMPT_PATH) || "").trim();
   if (!prompt) {
     throw new Error("Default prompt is missing or empty in shared storage.");
@@ -120,7 +121,7 @@ function loadLocalPrompt() {
 async function processDraft(draft) {
   const runId = `${Date.now()}-${process.pid}-${safePathPart(draft.id)}`;
   const now = new Date().toISOString();
-  const defaultPrompt = await loadRequiredDefaultPrompt();
+  const defaultPrompt = await loadRequiredDefaultPrompt(draft);
   const draftInState = await markDraftProcessing(draft, runId, now);
 
   const workDir = path.join(PROCESSING_ROOT, safePathPart(draft.id), runId);

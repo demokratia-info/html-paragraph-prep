@@ -125,11 +125,11 @@ app.post("/", async (request, response) => {
         });
       case "loadDefaultPrompt":
         return response.json(await loadDefaultPrompt({
+          user,
           localPromptFallback: readLocalPrompt()
         }));
       case "saveDefaultPrompt":
-        requireAdmin(user);
-        return response.json(await saveDefaultPrompt(payload.prompt));
+        return response.json(await saveDefaultPrompt(payload.prompt, { user }));
       case "getSourceFile":
         return response.json(await getSourceFileForUser(payload.remoteFilePath, user));
       case "checkStorage":
