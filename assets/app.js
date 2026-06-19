@@ -4,7 +4,7 @@ const STORAGE_KEY = "summary-html-desk.drafts.v1";
 const SETTINGS_KEY = "summary-html-desk.settings.v1";
 const DB_NAME = "summary-html-desk";
 const DB_VERSION = 1;
-const APP_VERSION = "20260619-3";
+const APP_VERSION = "20260619-4";
 const DEFAULT_BACKEND_ENDPOINT = "https://summary-api.demokratia.trade";
 const SESSION_TOKEN_SESSION_KEY = "summary-html-desk.session-token.session";
 const SESSION_TOKEN_STORAGE_KEY = "summary-html-desk.session-token.local";
@@ -132,6 +132,7 @@ const dom = {
   sourceList: $("#sourceList"),
   buildPromptButton: $("#buildPromptButton"),
   saveDefaultPromptButton: $("#saveDefaultPromptButton"),
+  copyUrlButton: $("#copyUrlButton"),
   promptOutput: $("#promptOutput"),
   defaultPromptDialog: $("#defaultPromptDialog"),
   errorBox: $("#errorBox"),
@@ -505,6 +506,7 @@ function bindEvents() {
     saveStateSoon();
   });
   dom.copyTargetHtmlTitleButton.addEventListener("click", copyTargetHtmlTitle);
+  dom.copyUrlButton.addEventListener("click", copySourceUrl);
 
   dom.exportDraftsButton.addEventListener("click", exportDrafts);
   dom.importDraftsInput.addEventListener("change", importDrafts);
@@ -1848,6 +1850,15 @@ async function copyTargetHtmlTitle() {
   touchDraft(draft);
   saveStateSoon();
   await copyText(value, "Target HTML title copied.");
+}
+
+async function copySourceUrl() {
+  const value = String(dom.linkUrlInput.value || "").trim();
+  if (!value) {
+    showToast("URL is empty.");
+    return;
+  }
+  await copyText(value, "URL copied.");
 }
 
 async function setExportedFromCheckbox() {

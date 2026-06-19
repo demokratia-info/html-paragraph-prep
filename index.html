@@ -8,7 +8,7 @@
     <meta name="description" content="A private GitHub Pages workspace for turning source material into CMS-ready HTML summaries.">
     <link rel="manifest" href="./manifest.webmanifest">
     <link rel="icon" href="./assets/favicon.svg" type="image/svg+xml">
-    <link rel="stylesheet" href="./assets/styles.css?v=20260619-3">
+    <link rel="stylesheet" href="./assets/styles.css?v=20260619-4">
   </head>
   <body>
     <section class="login-screen" id="loginScreen" aria-labelledby="loginTitle" hidden>
@@ -172,7 +172,10 @@
         <div class="source-entry">
           <label class="field">
             <span>URL</span>
-            <input id="linkUrlInput" type="url" autocomplete="url" inputmode="url">
+            <span class="copy-field-row">
+              <input id="linkUrlInput" type="url" autocomplete="url" inputmode="url">
+              <button class="icon-button" id="copyUrlButton" type="button" title="Copy URL" aria-label="Copy URL">⧉</button>
+            </span>
           </label>
         </div>
 
@@ -332,6 +335,6 @@
     </dialog>
 
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
-    <script src="./assets/app.js?v=20260619-3" defer></script>
+    <script src="./assets/app.js?v=20260619-4" defer></script>
   </body>
 </html>
