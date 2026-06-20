@@ -4,7 +4,7 @@ const STORAGE_KEY = "summary-html-desk.drafts.v1";
 const SETTINGS_KEY = "summary-html-desk.settings.v1";
 const DB_NAME = "summary-html-desk";
 const DB_VERSION = 1;
-const APP_VERSION = "20260619-5";
+const APP_VERSION = "20260620-1";
 const DEFAULT_BACKEND_ENDPOINT = "https://summary-api.demokratia.trade";
 const SESSION_TOKEN_SESSION_KEY = "summary-html-desk.session-token.session";
 const SESSION_TOKEN_STORAGE_KEY = "summary-html-desk.session-token.local";
@@ -1313,19 +1313,13 @@ function renderStatus() {
   dom.exportedTime.textContent = draft.exportedAt ? formatDateTime(draft.exportedAt) : "Not yet";
   dom.reviewedCheckbox.checked = draft.reviewed === true;
   dom.exportedCheckbox.checked = isDraftExported(draft);
-  renderProcessingButtonLabel(draft);
+  renderProcessingButtonLabel();
 }
 
-function renderProcessingButtonLabel(draft) {
-  const label = hasGeneratedResult(draft) ? "Save and Regenerate" : "Save for Processing";
+function renderProcessingButtonLabel() {
+  const label = "Save and Generate";
   const labelNode = dom.pushBackendButton.querySelector("span:last-child");
   if (labelNode) labelNode.textContent = label;
-}
-
-function hasGeneratedResult(draft) {
-  const status = normalizeStatus(draft.status);
-  return status === "done"
-    || Boolean(draft.processedAt || draft.exportedAt || String(draft.result || "").trim());
 }
 
 function renderDraftSelect() {
@@ -1736,11 +1730,34 @@ async function saveForProcessing() {
   renderSources();
   saveStateSoon();
 
-  await pushBackendSync({
+  const saved = await pushBackendSync({
     busyMessage: "Saving item for processing...",
     doneMessage: `"${draft.title}" is waiting for processing.`,
     toastMessage: "Saved for processing."
   });
+  if (saved) await kickLocalProcessing();
+}
+
+async function kickLocalProcessing() {
+  try {
+    const payload = await backendPost({ action: "kickProcessing" });
+    const message = payload?.message || "Local Codex processing started or queued.";
+    setSyncStatus(message);
+    showToast("Processing started or queued.");
+    window.setTimeout(() => {
+      pullBackendSync({
+        skipConfirm: true,
+        quiet: true,
+        mergeRemote: true,
+        preserveFocusedField: true,
+        background: true
+      }).catch((error) => console.warn("Processing status refresh failed", error));
+    }, 2500);
+  } catch (error) {
+    const message = `Saved, but local processing did not start: ${error.message || "unknown error"}`;
+    setSyncStatus(message);
+    showToast(message);
+  }
 }
 
 function shouldClearHtmlForProcessing(draft) {

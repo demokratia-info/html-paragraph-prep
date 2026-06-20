@@ -1,5 +1,7 @@
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
+import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import dotenv from "dotenv";
 import express from "express";
@@ -28,6 +30,10 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..");
 const DEFAULT_PORT = 8787;
 const MAX_JSON_BODY = "80mb";
+const PROCESSING_ROOT = path.join(REPO_ROOT, ".codex-processing");
+const PROCESS_REQUEST_FILE = path.join(PROCESSING_ROOT, "process-requested");
+const PROCESSOR_SCRIPT = path.join(REPO_ROOT, "scripts", "process_pending_with_codex.sh");
+const PROCESSOR_LOG = path.join(REPO_ROOT, "summary-cron.log");
 const DEFAULT_ALLOWED_ORIGINS = [
   "https://demokratia-info.github.io",
   "http://localhost:8080",
@@ -134,8 +140,10 @@ app.post("/", async (request, response) => {
         return response.json(await getSourceFileForUser(payload.remoteFilePath, user));
       case "checkStorage":
         return response.json(await checkStorage());
+      case "kickProcessing":
+        return response.json(kickProcessing());
       case "summarize":
-        throw httpError("The local PostgreSQL API does not run OpenAI directly. Use Save for Processing so the local Codex cron can process the item.", 400);
+        throw httpError("The local PostgreSQL API does not run OpenAI directly. Use Save and Generate so the local Codex processor can process the item.", 400);
       default:
         throw httpError("Unknown action.", 400);
     }
@@ -213,4 +221,63 @@ function readLocalPrompt() {
   const promptPath = path.join(REPO_ROOT, "prompt.txt");
   if (!fs.existsSync(promptPath)) return "";
   return fs.readFileSync(promptPath, "utf8").trim();
+}
+
+function kickProcessing() {
+  if (!fs.existsSync(PROCESSOR_SCRIPT)) {
+    throw httpError("Local Codex processor script is missing.", 500);
+  }
+
+  fs.mkdirSync(PROCESSING_ROOT, { recursive: true });
+  fs.writeFileSync(PROCESS_REQUEST_FILE, `${new Date().toISOString()}\n`, "utf8");
+
+  const logFd = fs.openSync(PROCESSOR_LOG, "a");
+  try {
+    const child = spawn(PROCESSOR_SCRIPT, ["--drain"], {
+      cwd: REPO_ROOT,
+      detached: true,
+      stdio: ["ignore", logFd, logFd],
+      env: processorEnv()
+    });
+    child.on("error", (error) => {
+      appendProcessorLog(`Could not start local Codex processor: ${error?.message || error}`);
+    });
+    child.unref();
+  } finally {
+    fs.closeSync(logFd);
+  }
+
+  return {
+    ok: true,
+    queued: true,
+    message: "Local Codex processing started or queued."
+  };
+}
+
+function appendProcessorLog(message) {
+  try {
+    fs.appendFileSync(PROCESSOR_LOG, `[${new Date().toISOString()}] ${message}\n`, "utf8");
+  } catch (error) {
+    console.error("Could not write processor log", error);
+  }
+}
+
+function processorEnv() {
+  const home = process.env.HOME || "/home/talraviv";
+  const pathPrefix = [
+    path.join(home, ".local", "bin"),
+    "/usr/local/sbin",
+    "/usr/local/bin",
+    "/usr/sbin",
+    "/usr/bin",
+    "/sbin",
+    "/bin"
+  ].join(":");
+  return {
+    ...process.env,
+    HOME: home,
+    PATH: `${pathPrefix}:${process.env.PATH || ""}`,
+    STORAGE_BACKEND: process.env.STORAGE_BACKEND || "postgres",
+    PGUSER: process.env.PGUSER || os.userInfo().username
+  };
 }

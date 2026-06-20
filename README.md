@@ -10,7 +10,7 @@ This project is intentionally independent of `Documents/DemocracyWebSite`.
 - Provides a compact browse list with search and status filters.
 - Keeps source links and uploaded origin files attached to each draft.
 - Accepts Hebrew source text, document links, uploaded PDFs, uploaded Word files, and uploaded text files.
-- Saves items to a local PostgreSQL-backed shared queue that a local Codex cron job can process.
+- Saves items to a local PostgreSQL-backed shared queue and wakes the local Codex processor immediately.
 - Keeps an editable prompt with each item, including a default prompt users can restore.
 - Converts the LLM result into clean CMS HTML.
 - Copies or downloads the generated HTML.
@@ -21,10 +21,10 @@ This project is intentionally independent of `Documents/DemocracyWebSite`.
 
 1. Open the app and enter the editor password once.
 2. Use the left panel to browse papers, search, filter by status, or click **Add New Paper**.
-3. Use the source panel to edit the paper title, save one URL, upload one or more files, and click **Save for Processing**.
+3. Use the source panel to edit the paper title, save one URL, upload one or more files, and click **Save and Generate**.
 4. Use the text panel to edit the prompt and generated text. Click **Generate HTML** when the text is ready.
 5. Use the HTML panel to review and click **Copy HTML**. The item status becomes **Exported**.
-6. The local Codex cron job processes waiting items and changes the status to **Ready**.
+6. The local Codex processor handles waiting items and changes the status to **Ready**.
 7. Click **Refresh** to load the latest shared work.
 
 Each item displays the last modified time, last processed time, and last exported time.
@@ -67,7 +67,7 @@ npm run db:migrate:github
 
 ## Local Codex Processing
 
-The website does not use the OpenAI API for the normal workflow. A local cron job runs Codex on this computer using the local ChatGPT/Codex login, checks the shared work list, and only starts Codex when an item is waiting.
+The website does not use the OpenAI API for the normal workflow. When a user clicks **Save and Generate**, the local API saves the item, wakes the Codex processor on this computer, and keeps waiting items queued. The cron job below can remain as a fallback check.
 
 Run one manual check:
 
@@ -88,6 +88,7 @@ Optional settings for the cron job:
 export CODEX_REASONING_EFFORT=xhigh
 export CODEX_MODEL=gpt-5.5
 export MAX_PENDING_PER_RUN=1
+export DRAIN_PENDING_LIMIT=20
 ```
 
 If an item already has result text and the prompt is changed, the processor asks Codex to keep the existing result as similar as possible and only make the changes requested by the latest prompt.

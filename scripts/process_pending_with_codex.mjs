@@ -26,6 +26,7 @@ const STATE_PATH = `${DATA_BASE_PATH}/drafts.json`;
 const DEFAULT_PROMPT_PATH = `${DATA_BASE_PATH}/default-prompt.txt`;
 const LOCAL_PROMPT_PATH = path.join(REPO_ROOT, "prompt.txt");
 const MAX_PENDING_PER_RUN = clamp(Number(process.env.MAX_PENDING_PER_RUN || 1), 1, 20);
+const DRAIN_PENDING_LIMIT = clamp(Number(process.env.DRAIN_PENDING_LIMIT || 20), 1, 100);
 const MAX_SOURCE_CHARS = clamp(Number(process.env.MAX_SOURCE_CHARS || 120000), 1000, 500000);
 const CODEX_TIMEOUT_MS = clamp(Number(process.env.CODEX_TIMEOUT_MS || 45 * 60 * 1000), 60 * 1000, 3 * 60 * 60 * 1000);
 const OCR_MAX_PAGES = clamp(Number(process.env.OCR_MAX_PAGES || 25), 1, 200);
@@ -36,6 +37,8 @@ const DEFAULT_DRAFT_TITLES = new Set(["", "מקור חדש", "מורק חדש", 
 const TITLE_MAX_CHARS = 90;
 const TARGET_HTML_TITLE_MAX_CHARS = 40;
 const PROCESSING_ROOT = path.join(REPO_ROOT, ".codex-processing");
+const PROCESS_REQUEST_FILE = path.join(PROCESSING_ROOT, "process-requested");
+const DRAIN_QUEUE = process.argv.includes("--drain");
 const GH_BIN = commandPath("gh");
 const CODEX_BIN = commandPath("codex");
 
@@ -61,7 +64,7 @@ async function main() {
   }
 
   let processed = 0;
-  for (let index = 0; index < MAX_PENDING_PER_RUN; index += 1) {
+  while (processed < activeProcessingLimit()) {
     const state = await loadSharedState();
     if (!state) {
       log("No shared work list found yet.");
@@ -70,6 +73,7 @@ async function main() {
 
     const draft = findNextPendingDraft(state.drafts);
     if (!draft) {
+      clearProcessRequest();
       log("No waiting items.");
       return;
     }
@@ -879,7 +883,7 @@ async function finalizeDraft(draftId, runId, updateDraft, message) {
     if (!freshState) throw new Error("Shared work list disappeared while processing.");
     const freshDraft = freshState.drafts.find((item) => item.id === draftId);
     if (!freshDraft) throw new Error("Item disappeared while processing.");
-    if (freshDraft.processingRunId && freshDraft.processingRunId !== runId) {
+    if (freshDraft.processingRunId !== runId) {
       log(`Skipping stale processing result for ${draftId}.`);
       return;
     }
@@ -895,6 +899,22 @@ async function finalizeDraft(draftId, runId, updateDraft, message) {
       }
       throw error;
     }
+  }
+}
+
+function activeProcessingLimit() {
+  return DRAIN_QUEUE || hasProcessRequest() ? DRAIN_PENDING_LIMIT : MAX_PENDING_PER_RUN;
+}
+
+function hasProcessRequest() {
+  return fs.existsSync(PROCESS_REQUEST_FILE);
+}
+
+function clearProcessRequest() {
+  try {
+    fs.unlinkSync(PROCESS_REQUEST_FILE);
+  } catch (error) {
+    if (error?.code !== "ENOENT") throw error;
   }
 }
 

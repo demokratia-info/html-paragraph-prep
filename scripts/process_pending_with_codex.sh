@@ -18,4 +18,4 @@ if command -v flock >/dev/null 2>&1; then
 fi
 
 cd "$ROOT_DIR"
-node scripts/process_pending_with_codex.mjs
+node scripts/process_pending_with_codex.mjs "$@"
