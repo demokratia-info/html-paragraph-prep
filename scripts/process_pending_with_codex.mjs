@@ -33,7 +33,6 @@ const OCR_MAX_PAGES = clamp(Number(process.env.OCR_MAX_PAGES || 25), 1, 200);
 const OCR_DPI = clamp(Number(process.env.OCR_DPI || 220), 100, 400);
 const OCR_LANGS = String(process.env.OCR_LANGS || "heb+eng").trim() || "heb+eng";
 const OCR_PSM = String(process.env.OCR_PSM || "6").trim() || "6";
-const DEFAULT_DRAFT_TITLES = new Set(["", "מקור חדש", "מורק חדש", "New paper", "Untitled summary", "CMS summary"]);
 const TITLE_MAX_CHARS = 90;
 const TARGET_HTML_TITLE_MAX_CHARS = 40;
 const PROCESSING_ROOT = path.join(REPO_ROOT, ".codex-processing");
@@ -149,10 +148,15 @@ async function processDraft(draft) {
     fs.writeFileSync(promptPath, prompt, "utf8");
 
     runCodex(prompt, resultPath);
-    const resultText = readResultText(resultPath);
-    if (!resultText) throw new Error("Codex finished without returning summary text.");
-    const derivedTitle = deriveTitleFromSources(preparedSources);
-    const targetHtmlTitle = generateTargetHtmlTitle(draftInState, preparedSources, resultText, workDir);
+    const rawResultText = readResultText(resultPath);
+    if (!rawResultText) throw new Error("Codex finished without returning summary text.");
+    const structuredResult = parseCodexStructuredResult(rawResultText);
+    const resultText = structuredResult.html || structuredResult.result || rawResultText;
+    const generatedSourceTitle = cleanGeneratedTitle(structuredResult.sourceTitle);
+    const generatedUrl = normalizeGeneratedUrl(structuredResult.url);
+    const derivedTitle = generatedSourceTitle || deriveTitleFromSources(preparedSources);
+    const generatedTargetHtmlTitle = normalizeTargetHtmlTitle(structuredResult.targetHtmlTitle);
+    const targetHtmlTitle = generatedTargetHtmlTitle || generateTargetHtmlTitle(draftInState, preparedSources, resultText, workDir);
 
     await finalizeDraft(draft.id, runId, (freshDraft) => {
       const processedAt = new Date().toISOString();
@@ -164,9 +168,10 @@ async function processDraft(draft) {
       freshDraft.reviewed = false;
       freshDraft.exportedAt = "";
       freshDraft.editedAfterGeneration = false;
-      if (shouldReplaceDraftTitle(freshDraft.title) && derivedTitle) {
+      if (derivedTitle) {
         freshDraft.title = derivedTitle;
       }
+      applyGeneratedUrl(freshDraft, generatedUrl, derivedTitle);
       freshDraft.status = "done";
       freshDraft.processedAt = processedAt;
       freshDraft.processingStartedAt = "";
@@ -253,10 +258,6 @@ function resolveCachedSourcePath(localPath) {
   return resolved;
 }
 
-function shouldReplaceDraftTitle(title) {
-  return DEFAULT_DRAFT_TITLES.has(String(title || "").trim());
-}
-
 function deriveTitleFromSources(sources) {
   for (const source of sources || []) {
     const title = deriveTitleFromText(source.extractedText || source.text || "");
@@ -313,6 +314,7 @@ function titleCandidate(line) {
 function isGenericTitleLine(value) {
   const normalized = value.replace(/[^\p{L}\p{N}]+/gu, " ").trim();
   return /^(לכבוד|עמוד|תוכן עניינים|page)$/i.test(normalized)
+    || /^this article was downloaded by\b/i.test(value)
     || (/^נייר עמדה\b/.test(normalized) && normalized.length < 40);
 }
 
@@ -522,8 +524,14 @@ function buildCodexPrompt(draft, sources, defaultPrompt) {
 
   return [
     "You are processing one saved item for the Summary HTML Desk website.",
-    "Return only the editable summary text that should be placed in the Result box.",
-    "Do not return HTML unless the saved prompt explicitly asks for HTML.",
+    "Return only one valid JSON object. Do not return markdown fences, commentary, or any text outside the JSON object.",
+    "The JSON object must contain exactly these string fields: sourceTitle, targetHtmlTitle, url, html.",
+    "sourceTitle: the best short title for the Source title field. For legal opinion documents, include the law/proposal name and the organization or person who submitted the opinion; omit excessive details such as full dates when possible.",
+    `targetHtmlTitle: an English slug for the Target HTML title field, maximum ${TARGET_HTML_TITLE_MAX_CHARS} characters, unique-looking, ASCII letters/numbers/hyphens only, no spaces.`,
+    "url: the best canonical public URL for the source document or cited source. Use an explicit source URL, DOI URL, or official document URL when available. If no reliable URL appears in the source material, return an empty string.",
+    "html: the editable result text for the Result box. Produce clean CMS-ready HTML by default, using only p, h2, h3, ul, ol, li, blockquote, strong, em, a, and br tags.",
+    "If the saved prompt explicitly instructs you to return plain text, markdown, JSON, or another non-HTML format, follow that instruction inside the html field instead.",
+    "For links in html, use absolute href values when possible. The app will add target and rel attributes.",
     "Do not edit files in the repository.",
     "Most sources and summaries are in Hebrew. Preserve Hebrew names, dates, titles, institutions, numbers, and causal claims accurately.",
     "",
@@ -537,6 +545,100 @@ function buildCodexPrompt(draft, sources, defaultPrompt) {
     "Sources:",
     sources.length ? sources.map(formatSourceForCodex).join("\n\n") : "No sources were saved for this item."
   ].join("\n");
+}
+
+function parseCodexStructuredResult(text) {
+  const raw = stripMarkdownFence(String(text || "")).trim();
+  const parsed = parseJsonObject(raw);
+  if (!parsed) return { html: raw };
+  const html = stringField(parsed.html) || stringField(parsed.result) || stringField(parsed.text);
+  return {
+    sourceTitle: stringField(parsed.sourceTitle),
+    targetHtmlTitle: stringField(parsed.targetHtmlTitle),
+    url: stringField(parsed.url),
+    html: html || raw
+  };
+}
+
+function parseJsonObject(raw) {
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : null;
+  } catch {
+    const start = raw.indexOf("{");
+    const end = raw.lastIndexOf("}");
+    if (start < 0 || end <= start) return null;
+    try {
+      const parsed = JSON.parse(raw.slice(start, end + 1));
+      return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : null;
+    } catch {
+      return null;
+    }
+  }
+}
+
+function stringField(value) {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function cleanGeneratedTitle(value) {
+  const text = String(value || "")
+    .replace(/^source\s+title\s*[:：-]\s*/i, "")
+    .replace(/^title\s*[:：-]\s*/i, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!text || isGenericTitleLine(text) || isDateLikeTitleLine(text)) return "";
+  return text.length > TITLE_MAX_CHARS ? `${text.slice(0, TITLE_MAX_CHARS - 1).trim()}…` : text;
+}
+
+function normalizeGeneratedUrl(value) {
+  let text = String(value || "")
+    .trim()
+    .replace(/^url\s*[:：-]\s*/i, "")
+    .replace(/^["'`]+|["'`,.;]+$/g, "");
+  if (!text) return "";
+  if (/^doi\s*:/i.test(text)) text = text.replace(/^doi\s*:/i, "https://doi.org/");
+  if (/^10\.\d{4,9}\//.test(text)) text = `https://doi.org/${text}`;
+  try {
+    const parsed = new URL(text);
+    if (!["http:", "https:"].includes(parsed.protocol)) return "";
+    return parsed.href;
+  } catch {
+    return "";
+  }
+}
+
+function applyGeneratedUrl(draft, url, title) {
+  if (!url) return;
+  if (!Array.isArray(draft.sources)) draft.sources = [];
+  const linkTitle = title || draft.title || "Source URL";
+  const existing = draft.sources.find((source) => source.type === "link")
+    || draft.sources.find((source) => source.id === `generated-url-${draft.id}`);
+  if (existing) {
+    existing.type = "link";
+    existing.title = linkTitle;
+    existing.url = url;
+    existing.text = "";
+    existing.filename = "";
+    existing.mimeType = "";
+    existing.size = 0;
+    existing.textAvailable = false;
+    existing.fileAvailable = false;
+    return;
+  }
+  draft.sources.push({
+    id: `generated-url-${draft.id}`,
+    type: "link",
+    title: linkTitle,
+    url,
+    text: "",
+    filename: "",
+    mimeType: "",
+    size: 0,
+    textAvailable: false,
+    fileAvailable: false,
+    createdAt: new Date().toISOString()
+  });
 }
 
 function formatSourceForCodex(source, index) {
@@ -1081,7 +1183,7 @@ function commandPath(command) {
 function readResultText(resultPath) {
   if (!fs.existsSync(resultPath)) return "";
   return fs.readFileSync(resultPath, "utf8")
-    .replace(/^```(?:html|text|markdown)?\s*/i, "")
+    .replace(/^```(?:html|text|markdown|json)?\s*/i, "")
     .replace(/\s*```$/i, "")
     .trim();
 }
