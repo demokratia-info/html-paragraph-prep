@@ -76,10 +76,10 @@ cd /home/talraviv/html-paragraph-prep
 scripts/process_pending_with_codex.sh
 ```
 
-Add this cron entry to check once per minute:
+Add this cron entry to check once every five minutes:
 
 ```cron
-* * * * * cd /home/talraviv/html-paragraph-prep && scripts/process_pending_with_codex.sh >> /home/talraviv/html-paragraph-prep/summary-cron.log 2>&1
+*/5 * * * * cd /home/talraviv/html-paragraph-prep && scripts/process_pending_with_codex.sh >> /home/talraviv/html-paragraph-prep/summary-cron.log 2>&1
 ```
 
 Optional settings for the cron job:
