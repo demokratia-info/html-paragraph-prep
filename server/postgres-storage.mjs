@@ -348,6 +348,35 @@ export async function deleteUser(userId, actor) {
   }
 }
 
+export async function deleteDraft(draftId, options = {}) {
+  await initDatabase();
+  const id = String(draftId || "").trim();
+  if (!id) throw httpError("Missing source id.", 400);
+
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+    const result = await client.query(
+      "SELECT owner_user_id FROM drafts WHERE id = $1 FOR UPDATE",
+      [id]
+    );
+    const row = result.rows[0];
+    if (!row) {
+      await client.query("COMMIT");
+      return { ok: true, id, deleted: false };
+    }
+    assertOwnerAccess(row.owner_user_id, options.user);
+    await client.query("DELETE FROM drafts WHERE id = $1", [id]);
+    await client.query("COMMIT");
+    return { ok: true, id, deleted: true };
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
 export async function loadSharedState(options = {}) {
   await initDatabase();
   const user = options.user || null;
@@ -397,8 +426,8 @@ export async function saveSharedState(shared, options = {}) {
   try {
     await client.query("BEGIN");
     const ids = drafts.map((draft) => draft.id);
-    const usedTargetHtmlTitles = await reservedTargetHtmlTitles(client, scope);
-    await clearTargetHtmlTitlesForSaveScope(client, scope);
+    const usedTargetHtmlTitles = await reservedTargetHtmlTitles(client, ids);
+    await clearTargetHtmlTitlesForDrafts(client, ids);
     for (const draft of drafts) {
       const owner = await resolveDraftOwner(draft, { user, scope, client, ownerCache });
       draft.ownerUserId = owner?.id || "";
@@ -440,17 +469,19 @@ export async function saveSharedState(shared, options = {}) {
       );
     }
 
-    if (ids.length && scope.mode === "owner") {
-      await client.query(
-        "DELETE FROM drafts WHERE owner_user_id = $2 AND NOT (id = ANY($1::text[]))",
-        [ids, scope.ownerId]
-      );
-    } else if (ids.length) {
-      await client.query("DELETE FROM drafts WHERE NOT (id = ANY($1::text[]))", [ids]);
-    } else if (scope.mode === "owner") {
-      await client.query("DELETE FROM drafts WHERE owner_user_id = $1", [scope.ownerId]);
-    } else {
-      await client.query("DELETE FROM drafts");
+    if (options.replaceMissing === true) {
+      if (ids.length && scope.mode === "owner") {
+        await client.query(
+          "DELETE FROM drafts WHERE owner_user_id = $2 AND NOT (id = ANY($1::text[]))",
+          [ids, scope.ownerId]
+        );
+      } else if (ids.length) {
+        await client.query("DELETE FROM drafts WHERE NOT (id = ANY($1::text[]))", [ids]);
+      } else if (scope.mode === "owner") {
+        await client.query("DELETE FROM drafts WHERE owner_user_id = $1", [scope.ownerId]);
+      } else {
+        await client.query("DELETE FROM drafts");
+      }
     }
 
     const updatedAt = new Date().toISOString();
@@ -849,32 +880,30 @@ function saveScopeForUser(user, ownerUserId) {
   return { mode: "owner", ownerId: user.id };
 }
 
-async function reservedTargetHtmlTitles(client, scope) {
-  if (scope.mode !== "owner") return new Set();
+async function reservedTargetHtmlTitles(client, excludedIds = []) {
   const result = await client.query(
     `
       SELECT target_html_title
       FROM drafts
       WHERE target_html_title <> ''
-        AND owner_user_id IS DISTINCT FROM $1
+        AND NOT (id = ANY($1::text[]))
       FOR UPDATE
     `,
-    [scope.ownerId]
+    [excludedIds]
   );
   return new Set(result.rows.map((row) => String(row.target_html_title || "").toLowerCase()));
 }
 
-async function clearTargetHtmlTitlesForSaveScope(client, scope) {
-  const where = scope.mode === "owner" ? "WHERE owner_user_id = $1" : "";
-  const params = scope.mode === "owner" ? [scope.ownerId] : [];
+async function clearTargetHtmlTitlesForDrafts(client, ids) {
+  if (!ids.length) return;
   await client.query(
     `
       UPDATE drafts
       SET target_html_title = '',
           payload = payload - 'targetHtmlTitle'
-      ${where}
+      WHERE id = ANY($1::text[])
     `,
-    params
+    [ids]
   );
 }
 

@@ -4,7 +4,7 @@ const STORAGE_KEY = "summary-html-desk.drafts.v1";
 const SETTINGS_KEY = "summary-html-desk.settings.v1";
 const DB_NAME = "summary-html-desk";
 const DB_VERSION = 1;
-const APP_VERSION = "20260620-1";
+const APP_VERSION = "20260620-2";
 const DEFAULT_BACKEND_ENDPOINT = "https://summary-api.demokratia.trade";
 const SESSION_TOKEN_SESSION_KEY = "summary-html-desk.session-token.session";
 const SESSION_TOKEN_STORAGE_KEY = "summary-html-desk.session-token.local";
@@ -449,17 +449,28 @@ function bindEvents() {
       "",
       "This operation cannot be undone."
     ].join("\n"))) return;
-    await deleteDraftFiles(draft);
-    await idbDelete("drafts", draft.id);
-    state.drafts = state.drafts.filter((item) => item.id !== draft.id);
-    state.activeId = state.drafts[0].id;
-    render();
-    await saveState();
-    await pushBackendSync({
-      busyMessage: "Deleting source...",
-      doneMessage: `"${title}" was deleted from the shared workspace.`,
-      toastMessage: "Source deleted."
-    });
+    setSyncBusy(true, "Deleting source...");
+    try {
+      await backendPost({
+        action: "deleteDraft",
+        draftId: draft.id
+      });
+      await deleteDraftFiles(draft);
+      await idbDelete("drafts", draft.id);
+      state.drafts = state.drafts.filter((item) => item.id !== draft.id);
+      state.activeId = state.drafts[0].id;
+      state.remoteDraftIds.delete(draft.id);
+      render();
+      await saveState();
+      setSyncStatus(`"${title}" was deleted from the shared workspace.`);
+      showToast("Source deleted.");
+    } catch (error) {
+      const message = error.message || "Delete failed.";
+      setSyncStatus(message);
+      showToast(message);
+    } finally {
+      setSyncBusy(false);
+    }
   });
 
   dom.draftSelect.addEventListener("change", () => {

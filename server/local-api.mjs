@@ -8,6 +8,7 @@ import express from "express";
 import {
   checkStorage,
   createUser,
+  deleteDraft,
   deleteSessionToken,
   deleteUser,
   getSourceFileForUser,
@@ -110,15 +111,19 @@ app.post("/", async (request, response) => {
         requireAdmin(user);
         await deleteUser(payload.userId, user);
         return response.json({ ok: true, users: await listUsers() });
+      case "deleteDraft":
+        return response.json(await deleteDraft(payload.draftId, { user }));
       case "saveSourceFile":
         return response.json(await saveSourceFile({
           ...(payload.source || {}),
           draftId: payload.draftId || payload.source?.draftId || null
         }, payload.fileData, { user }));
       case "saveSharedState":
+        if (payload.replaceMissing === true) requireAdmin(user);
         return response.json(await saveSharedState(payload.payload, {
           user,
-          ownerUserId: payload.ownerUserId || ""
+          ownerUserId: payload.ownerUserId || "",
+          replaceMissing: payload.replaceMissing === true
         }));
       case "loadSharedState":
         return response.json({

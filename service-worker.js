@@ -1,12 +1,12 @@
 "use strict";
 
 const CACHE_PREFIX = "summary-html-desk-";
-const CACHE_NAME = `${CACHE_PREFIX}v58`;
+const CACHE_NAME = `${CACHE_PREFIX}v59`;
 const ASSETS = [
   "./",
   "./index.html",
-  "./assets/styles.css?v=20260620-1",
-  "./assets/app.js?v=20260620-1",
+  "./assets/styles.css?v=20260620-2",
+  "./assets/app.js?v=20260620-2",
   "./assets/favicon.svg",
   "./manifest.webmanifest"
 ];

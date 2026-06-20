@@ -43,7 +43,7 @@ try {
     version: state.version || 1,
     app: state.app || "summary-html-desk",
     updatedAt: new Date().toISOString()
-  });
+  }, { replaceMissing: true });
 
   const missingFiles = [];
   let migratedFiles = 0;
@@ -84,7 +84,7 @@ try {
     version: state.version || 1,
     app: state.app || "summary-html-desk",
     updatedAt: new Date().toISOString()
-  });
+  }, { replaceMissing: true });
 
   const loaded = await loadSharedState();
   process.stdout.write(`${JSON.stringify({
